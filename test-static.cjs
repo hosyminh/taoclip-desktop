@@ -93,5 +93,26 @@ check(`moi khoa t('...') (${used.size} khoa) deu co trong ban vi`, undefinedKeys
 const missingEn = [...dictionaries.vi].filter((key) => !dictionaries.en.has(key))
 check('ban en khong thieu khoa nao cua ban vi', missingEn.length === 0, missingEn)
 
+// 3) Kieu chuyen canh: danh sach ben renderer phai khop allowlist XFADE_STYLES o main (ten duoc ghep vao filtergraph), va moi nhan deu co trong i18n
+const styleSource = fs.readFileSync(path.join(rendererDir, 'transition-styles.js'), 'utf8')
+const rendererStyles = [...styleSource.matchAll(/\{ id: '([a-z]+)', key: '([a-z_]+)' \}/g)].map((m) => ({ id: m[1], key: m[2] }))
+const mainSetMatch = /XFADE_STYLES = new Set\(\[([^\]]*)\]\)/.exec(fs.readFileSync(path.join(__dirname, 'electron', 'ffmpeg-ops.cjs'), 'utf8'))
+const mainStyleIds = mainSetMatch ? [...mainSetMatch[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]) : []
+const sortedRenderer = rendererStyles.map((s) => s.id).sort()
+const sortedMain = [...mainStyleIds].sort()
+check('kieu chuyen canh o renderer khop XFADE_STYLES o electron/ffmpeg-ops.cjs', rendererStyles.length > 0 && JSON.stringify(sortedRenderer) === JSON.stringify(sortedMain),
+  [`renderer: ${sortedRenderer.join(', ')}`, `main: ${sortedMain.join(', ')}`])
+const styleKeysMissing = rendererStyles.flatMap(({ key }) => ['vi', 'en'].filter((lang) => !dictionaries[lang].has(key)).map((lang) => `${key} (${lang})`))
+check(`moi nhan kieu chuyen canh (${rendererStyles.length} kieu) deu co trong i18n vi va en`, styleKeysMissing.length === 0, styleKeysMissing)
+
+// 4) Sticker: moi id trong sticker-catalog.js co anh PNG, va moi nhom sticker co nhan trong i18n
+const catalogSource = fs.readFileSync(path.join(rendererDir, 'sticker-catalog.js'), 'utf8')
+const stickerIds = [...catalogSource.matchAll(/\{ id: 'twemoji\/([0-9a-f]+)', char: '[^']*' \}/g)].map((m) => m[1])
+const missingPng = stickerIds.filter((hex) => !fs.existsSync(path.join(rendererDir, 'public', 'stickers', 'twemoji', `${hex}.png`)))
+check(`moi sticker (${stickerIds.length}) co anh PNG trong public/stickers`, stickerIds.length > 0 && missingPng.length === 0, missingPng)
+const groupKeys = [...catalogSource.matchAll(/key: '(sticker_group_[a-z]+)'/g)].map((m) => m[1])
+const groupKeysMissing = groupKeys.flatMap((key) => ['vi', 'en'].filter((lang) => !dictionaries[lang].has(key)).map((lang) => `${key} (${lang})`))
+check(`moi nhom sticker (${groupKeys.length}) co nhan trong i18n vi va en`, groupKeys.length > 0 && groupKeysMissing.length === 0, groupKeysMissing)
+
 console.log(`\n================  ${pass} PASS / ${fail} FAIL  ================`)
 process.exit(fail ? 1 : 0)

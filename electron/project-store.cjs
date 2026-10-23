@@ -7,7 +7,7 @@ const MAX_PROJECT_BYTES = 25 * 1024 * 1024
 function forEachAsset(project, visit) {
   for (const clip of project.clips || []) visit(clip)
   for (const asset of project.assets || []) visit(asset)
-  for (const item of project.videoOverlays || []) visit(item)
+  for (const item of project.videoOverlays || []) if (!item?.sticker) visit(item)
   for (const item of project.audioItems || []) visit(item)
   if (project.music?.path) visit(project.music)
   if (project.voice?.path) visit(project.voice)

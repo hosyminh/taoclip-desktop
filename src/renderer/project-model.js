@@ -1,4 +1,8 @@
-const PROJECT_VERSION = 4
+import { normalizeTracks, assignDefaultTracks, withLayerZIndex } from './track-model.js'
+import { DEFAULT_TRANSITION_STYLE, TRANSITION_STYLES } from './transition-styles.js'
+import { stickerIdForChar } from './sticker-catalog.js'
+
+const PROJECT_VERSION = 5
 
 const DEFAULTS = Object.freeze({
   ratio: '9:16',
@@ -11,6 +15,7 @@ const DEFAULTS = Object.freeze({
   videoOverlays: [],
   audioItems: [],
   transition: 'none',
+  transitionStyle: DEFAULT_TRANSITION_STYLE,
   transitionDuration: 0.5,
   clips: [],
   assets: [],
@@ -72,6 +77,21 @@ function inferLegacyAssets(data, makeId = defaultId) {
   return [...byPath.values()]
 }
 
+// v5: nhac nen / long tieng khong con la hai o rieng ma la audio item tren track; doi file v4 sang item.
+function migrateAudioSlots(data) {
+  const items = Array.isArray(data.audioItems) ? data.audioItems.slice() : []
+  const has = (id, itemPath, role) => items.some((item) => item?.id === id || (item?.path === itemPath && item?.track === role))
+  if (data.music?.path && !has('legacy-music', data.music.path, 'music')) {
+    items.push({ id: 'legacy-music', path: data.music.path, name: data.music.name, track: 'music', start: 0, in: 0,
+      out: Math.max(0.001, Number(data.bgDur) || 0.001), gain: data.musicVol ?? 0.4, loop: data.bgLoop !== false })
+  }
+  if (data.voice?.path && !has('legacy-voice', data.voice.path, 'voice')) {
+    items.push({ id: 'legacy-voice', path: data.voice.path, name: data.voice.name, track: 'voice', start: data.voiceOffset ?? 0, in: 0,
+      out: Math.max(0.001, Number(data.voiceDur) || 0.001), gain: data.voiceVol ?? 1 })
+  }
+  return items
+}
+
 function finite(value, label, { min = -Infinity, max = Infinity } = {}) {
   const n = Number(value)
   if (!Number.isFinite(n) || n < min || n > max) throw new Error(`Project không hợp lệ: ${label}`)
@@ -102,8 +122,24 @@ function migrateLegacy(data) {
     migrated.projectId ??= defaultId('project', 0)
   }
   if (version < 4) migrated.assets ??= inferLegacyAssets(migrated)
+  if (version < 5) { migrated.audioItems = migrateAudioSlots(migrated); migrated.music = null; migrated.voice = null }
   migrated.version = PROJECT_VERSION
   return migrated
+}
+
+// Sticker V2 la anh trong app nen khong co path; id phai khop bo sticker-catalog.js
+const STICKER_ID = /^twemoji\/[0-9a-f]+$/
+
+// Overlay emoji chu cu co sticker tuong ung -> item V2 kind image, giu vi tri, thoi gian va kich thuoc
+function legacyEmojiToSticker(item) {
+  const start = Number(item.start) || 0
+  const end = Number.isFinite(Number(item.end)) ? Number(item.end) : start + 3
+  const size = Number.isFinite(Number(item.size)) ? Number(item.size) : 0.14
+  return {
+    id: item.id, sticker: stickerIdForChar(item.text), name: item.text, kind: 'image',
+    start, in: 0, out: Math.max(0.1, end - start), x: item.x ?? 0.5, y: item.y ?? 0.5,
+    width: size, height: size, opacity: 1, zIndex: item.zIndex ?? 0
+  }
 }
 
 export function normalizeProject(input, makeId = defaultId) {
@@ -114,14 +150,12 @@ export function normalizeProject(input, makeId = defaultId) {
   delete migrated.googleTtsKey
   delete migrated.googleTtsKeyEnc
   const clips = Array.isArray(migrated.clips) ? migrated.clips : DEFAULTS.clips
-  const overlays = Array.isArray(migrated.overlays) ? migrated.overlays : DEFAULTS.overlays
-  const videoOverlays = Array.isArray(migrated.videoOverlays) ? migrated.videoOverlays : DEFAULTS.videoOverlays
-  const audioItems = Array.isArray(migrated.audioItems) ? migrated.audioItems : [
-    ...(migrated.music?.path ? [{ id: 'legacy-music', path: migrated.music.path, name: migrated.music.name, track: 'music', start: 0,
-      in: 0, out: Math.max(0.001, Number(migrated.bgDur) || 0.001), gain: migrated.musicVol ?? 0.4, loop: migrated.bgLoop !== false }] : []),
-    ...(migrated.voice?.path ? [{ id: 'legacy-voice', path: migrated.voice.path, name: migrated.voice.name, track: 'voice', start: migrated.voiceOffset ?? 0,
-      in: 0, out: Math.max(0.001, Number(migrated.voiceDur) || 0.001), gain: migrated.voiceVol ?? 1 }] : [])
-  ]
+  const rawOverlays = Array.isArray(migrated.overlays) ? migrated.overlays : DEFAULTS.overlays
+  // Emoji chu cu co sticker thi chuyen sang V2; emoji khong co sticker va cac overlay khac giu nguyen
+  const legacyStickers = rawOverlays.filter((item) => item?.type === 'emoji' && stickerIdForChar(item.text))
+  const overlays = rawOverlays.filter((item) => !legacyStickers.includes(item))
+  const videoOverlays = [...(Array.isArray(migrated.videoOverlays) ? migrated.videoOverlays : DEFAULTS.videoOverlays), ...legacyStickers.map(legacyEmojiToSticker)]
+  const audioItems = Array.isArray(migrated.audioItems) ? migrated.audioItems : []
   const captions = Array.isArray(migrated.captions) ? migrated.captions : DEFAULTS.captions
   const assetSource = Array.isArray(migrated.assets) ? migrated.assets : inferLegacyAssets(migrated, makeId)
   const normalizedAssets = []
@@ -160,6 +194,7 @@ export function normalizeProject(input, makeId = defaultId) {
       out: output,
       speed: kind === 'image' ? 1 : speed,
       cropMode,
+      audioDetached: kind === 'video' && !!clip.audioDetached,
       cropX: finite(clip.cropX ?? 0.5, `clips[${index}].cropX`, { min: 0, max: 1 }),
       cropY: finite(clip.cropY ?? 0.5, `clips[${index}].cropY`, { min: 0, max: 1 }),
       name: typeof clip.name === 'string' && clip.name ? clip.name : clip.path.split(/[\\/]/).pop(),
@@ -183,15 +218,17 @@ export function normalizeProject(input, makeId = defaultId) {
       zIndex: finite(overlay.zIndex ?? index + 1, `overlays[${index}].zIndex`, { min: 0, max: 10000 }) }
   })
   const normalizedVideoOverlays = videoOverlays.map((item, index) => {
-    if (!item || typeof item !== 'object' || typeof item.path !== 'string' || !item.path.trim()) {
+    const sticker = item && typeof item === 'object' && item.sticker ? item.sticker : null
+    if (sticker && !STICKER_ID.test(sticker)) throw new Error(`Project không hợp lệ: videoOverlays[${index}].sticker`)
+    if (!item || typeof item !== 'object' || (!sticker && (typeof item.path !== 'string' || !item.path.trim()))) {
       throw new Error(`Project không hợp lệ: videoOverlays[${index}].path`)
     }
-    const kind = item.kind === 'image' ? 'image' : 'video'
+    const kind = (sticker || item.kind === 'image') ? 'image' : 'video'
     const start = finite(item.start ?? 0, `videoOverlays[${index}].start`, { min: 0 })
     const input = kind === 'image' ? 0 : finite(item.in ?? 0, `videoOverlays[${index}].in`, { min: 0 })
     const output = finite(item.out ?? (kind === 'image' ? 3 : input + 0.1), `videoOverlays[${index}].out`, { min: input + 0.001 })
     return {
-      ...item, id: item.id || makeId('video-overlay', index), kind, start, in: input, out: output,
+      ...item, id: item.id || makeId('video-overlay', index), kind, path: sticker ? '' : item.path, start, in: input, out: output,
       speed: kind === 'image' ? 1 : finite(item.speed ?? 1, `videoOverlays[${index}].speed`, { min: 0.05, max: 16 }),
       x: finite(item.x ?? 0.5, `videoOverlays[${index}].x`, { min: 0, max: 1 }),
       y: finite(item.y ?? 0.5, `videoOverlays[${index}].y`, { min: 0, max: 1 }),
@@ -205,12 +242,13 @@ export function normalizeProject(input, makeId = defaultId) {
     if (!item || typeof item !== 'object' || typeof item.path !== 'string' || !item.path.trim()) {
       throw new Error(`Project không hợp lệ: audioItems[${index}].path`)
     }
-    const track = item.track === 'voice' ? 'voice' : item.track === 'music' ? 'music' : null
+    const track = ['voice', 'music', 'original'].includes(item.track) ? item.track : null
     if (!track) throw new Error(`Project không hợp lệ: audioItems[${index}].track`)
     const start = finite(item.start ?? 0, `audioItems[${index}].start`, { min: 0 })
     const sourceIn = finite(item.in ?? 0, `audioItems[${index}].in`, { min: 0 })
     const sourceOut = finite(item.out ?? sourceIn + 0.1, `audioItems[${index}].out`, { min: sourceIn + 0.001 })
     return { ...item, id: item.id || makeId('audio', index), track, start, in: sourceIn, out: sourceOut,
+      speed: finite(item.speed ?? 1, `audioItems[${index}].speed`, { min: 0.05, max: 16 }),
       gain: finite(item.gain ?? 1, `audioItems[${index}].gain`, { min: 0, max: 4 }),
       fadeIn: finite(item.fadeIn ?? 0, `audioItems[${index}].fadeIn`, { min: 0 }),
       fadeOut: finite(item.fadeOut ?? 0, `audioItems[${index}].fadeOut`, { min: 0 }),
@@ -236,6 +274,8 @@ export function normalizeProject(input, makeId = defaultId) {
   if (!['9:16', '1:1', '4:5', '16:9', 'original'].includes(ratio)) throw new Error('Project không hợp lệ: ratio')
   if (!['none', 'bright', 'warm', 'cool', 'vivid', 'bw', 'vintage'].includes(migrated.filterKey ?? DEFAULTS.filterKey)) throw new Error('Project không hợp lệ: filterKey')
   if (!['none', 'fade', 'cross'].includes(migrated.transition ?? DEFAULTS.transition)) throw new Error('Project không hợp lệ: transition')
+  // Kieu xfade chi dung khi transition = cross; project cu/kieu la thi ve mac dinh (hoa tan)
+  const transitionStyle = TRANSITION_STYLES.some((item) => item.id === migrated.transitionStyle) ? migrated.transitionStyle : DEFAULT_TRANSITION_STYLE
   const transitionDuration = finite(migrated.transitionDuration ?? DEFAULTS.transitionDuration, 'transitionDuration', { min: 0.1, max: 2 })
   const filterIntensity = finite(migrated.filterIntensity ?? DEFAULTS.filterIntensity, 'filterIntensity', { min: 0, max: 100 })
   const silenceSource = migrated.silenceParams || {}
@@ -281,6 +321,12 @@ export function normalizeProject(input, makeId = defaultId) {
         pad: finite(opts.pad ?? 0.06, 'autoInfo.options.pad', { min: 0, max: 1 }) } }
   }
 
+  // v5: moi item phu/audio thuoc mot track; du an cu duoc xep track theo thu tu thoi gian, va cham thi sang track ke tiep
+  const usedTrackIds = [...normalizedVideoOverlays, ...normalizedAudioItems].map((item) => item.trackId).filter(Boolean)
+  const assigned = assignDefaultTracks({ tracks: normalizeTracks(migrated.tracks, usedTrackIds),
+    videoItems: normalizedVideoOverlays, audioItems: normalizedAudioItems })
+  const tracks = normalizeTracks(assigned.tracks, [...assigned.videoItems, ...assigned.audioItems].map((item) => item.trackId))
+
   return {
     ...DEFAULTS,
     ...migrated,
@@ -288,12 +334,14 @@ export function normalizeProject(input, makeId = defaultId) {
     projectId: migrated.projectId || makeId('project', 0),
     ratio,
     filterIntensity,
+    transitionStyle,
     transitionDuration,
     clips: normalizedClips,
     assets: normalizedAssets,
     overlays: normalizedOverlays,
-    videoOverlays: normalizedVideoOverlays,
-    audioItems: normalizedAudioItems,
+    tracks,
+    videoOverlays: withLayerZIndex(assigned.videoItems, tracks),
+    audioItems: assigned.audioItems,
     captions: normalizedCaptions,
     captionTimebase,
     keepSegments,

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { fileUrl } from './utils.js'
+import { stickerUrl } from './sticker-catalog.js'
 import { attachDocumentMouseDrag } from './drag-utils.js'
 
 export default function VideoOverlayPreview({ item, current, playing, onEditStart, onEditEnd, onPositionChange, safeZone = false }) {
@@ -39,7 +40,7 @@ export default function VideoOverlayPreview({ item, current, playing, onEditStar
     const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); onEditEnd?.() }
     attachDocumentMouseDrag(move, up)
   }
-  if (item.kind === 'image') return <img className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={fileUrl(item.path)} alt="" draggable={false} style={style} onMouseDown={beginPositionDrag} onError={() => setFailed(true)} />
+  if (item.kind === 'image') return <img className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={item.sticker ? stickerUrl(item.sticker) : fileUrl(item.path)} alt="" draggable={false} style={style} onMouseDown={beginPositionDrag} onError={() => setFailed(true)} />
   return <video ref={videoRef} className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={fileUrl(item.path)} muted playsInline preload="auto" style={style}
     onMouseDown={beginPositionDrag}
     onLoadedMetadata={(event) => {

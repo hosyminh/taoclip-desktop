@@ -8,7 +8,7 @@ function cloneProject(project) { return JSON.parse(JSON.stringify(project)) }
 function forEachAsset(project, visit) {
   for (const clip of project.clips || []) visit(clip, 'clip')
   for (const asset of project.assets || []) visit(asset, 'library asset')
-  for (const item of project.videoOverlays || []) visit(item, 'video overlay')
+  for (const item of project.videoOverlays || []) if (!item?.sticker) visit(item, 'video overlay')
   for (const item of project.audioItems || []) visit(item, 'audio item')
   if (project.music?.path) visit(project.music, 'music')
   if (project.voice?.path) visit(project.voice, 'voice')

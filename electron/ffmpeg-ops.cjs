@@ -703,11 +703,15 @@ function encodeImageTS({ input, dur, dims, cropMode = 'fit', cropX = 0.5, cropY 
   })
 }
 
+// Kieu xfade duoc phep (khop transition-styles.js o renderer). Ten duoc ghep thang vao filtergraph nen phai nam trong danh sach nay
+const XFADE_STYLES = new Set(['fade', 'dissolve', 'wipeleft', 'wiperight', 'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown', 'circleopen', 'circleclose', 'radial', 'pixelize', 'zoomin'])
+
 // ---------- Noi cac doan bang CROSSFADE (hoa tan chong nhau) - 1 pass filtergraph ----------
-// inputs: cac .ts da chuan hoa (dims/fps30/sar1); durs: thoi luong tung doan; dur: do dai hoa tan
-function crossfadeChain({ inputs, durs, dur, overlaps, output, hasAudio, onProgress }) {
+// inputs: cac .ts da chuan hoa (dims/fps30/sar1); durs: thoi luong tung doan; dur: do dai hoa tan; style: kieu xfade (mac dinh fade)
+function crossfadeChain({ inputs, durs, dur, overlaps, output, hasAudio, style, onProgress }) {
   return new Promise((resolve, reject) => {
     const n = inputs.length
+    const xfadeStyle = XFADE_STYLES.has(style) ? style : 'fade'
     const fadeAt = (i) => Number(overlaps?.[i] ?? dur) || 0
     const args = ['-y']
     inputs.forEach((f) => args.push('-i', path.resolve(f)))
@@ -718,7 +722,7 @@ function crossfadeChain({ inputs, durs, dur, overlaps, output, hasAudio, onProgr
       const D = fadeAt(i - 1)
       const off = Math.max(0, combined - D)
       const out = i === n - 1 ? '[vout]' : `[v${i}]`
-      fc.push(`${cur}[${i}:v]xfade=transition=fade:duration=${D.toFixed(3)}:offset=${off.toFixed(3)}${out}`)
+      fc.push(`${cur}[${i}:v]xfade=transition=${xfadeStyle}:duration=${D.toFixed(3)}:offset=${off.toFixed(3)}${out}`)
       cur = out; combined += durs[i] - D
     }
     // Chuoi acrossfade audio (neu co tieng)
@@ -787,7 +791,7 @@ async function exportClips({ clips, output, ratio, colorFilter, transition, edit
       parts.push(out)
     }
     if (xfade && parts.length > 1) {
-      await crossfadeChain({ inputs: parts, durs, overlaps, dur: fadeDur, output, hasAudio: anyAudio, onProgress: (sec) => onProgress && onProgress(Math.min(99, 50 + Math.round((sec / totalOut) * 49))) })
+      await crossfadeChain({ inputs: parts, durs, overlaps, dur: fadeDur, style: transition.style, output, hasAudio: anyAudio, onProgress: (sec) => onProgress && onProgress(Math.min(99, 50 + Math.round((sec / totalOut) * 49))) })
     } else {
       await concatTS({ inputs: parts, output, hasAudio: anyAudio })
     }

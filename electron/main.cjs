@@ -24,6 +24,10 @@ function registerMediaProtocol() {
   })
 }
 
+// Kiem thu e2e (e2e/lib.cjs): TAOCLIP_E2E_DIALOGS la JSON {kenh: gia tri tra ve} de bo qua hop thoai he dieu hanh
+const E2E_DIALOGS = (() => { try { return JSON.parse(process.env.TAOCLIP_E2E_DIALOGS || '{}') } catch { return {} } })()
+const e2eDialog = (name) => (Object.prototype.hasOwnProperty.call(E2E_DIALOGS, name) ? { value: E2E_DIALOGS[name] } : null)
+
 // --- FFmpeg / FFprobe (dong goi san, khong can cai he thong) ---
 const os = require('os')
 const ops = require('./ffmpeg-ops.cjs')
@@ -33,6 +37,7 @@ const portableProject = require('./portable-project.cjs')
 const outputStore = require('./output-store.cjs')
 const recoveryStore = require('./recovery-store.cjs')
 const settingsStore = require('./settings.cjs')
+const stickers = require('./stickers.cjs')
 settingsStore.configure({ app, safeStorage })
 const PREVIEW_PROXY_JOBS = new Map()
 const DOWNLOAD_JOBS = new Map()
@@ -60,6 +65,9 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#0f1115',
     title: 'TaoClip',
+    // Windows: bo thanh tieu de trang mac dinh, header toi cua app tu lam thanh tieu de; nut thu/phong/dong la overlay
+    // (height phai khop .cc-top = 48px trong styles.css)
+    ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#16161a', symbolColor: '#f2f3f5', height: 48 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -218,6 +226,7 @@ ipcMain.handle('captions:generate', async (event, filePath, opts) => {
 
 // Chon noi luu file xuat
 ipcMain.handle('dialog:saveVideo', async (_e, defaultName) => {
+  const stub = e2eDialog('saveVideo'); if (stub) return stub.value
   const res = await dialog.showSaveDialog({
     title: 'Luu video',
     defaultPath: defaultName || 'taoclip-export.mp4',
@@ -258,6 +267,7 @@ ipcMain.handle('captions:openSrt', async () => {
 
 // Chon file am thanh (nhac nen)
 ipcMain.handle('dialog:openAudio', async () => {
+  const stub = e2eDialog('openAudio'); if (stub) return stub.value
   const res = await dialog.showOpenDialog({
     title: 'Chon nhac nen',
     properties: ['openFile'],
@@ -267,6 +277,7 @@ ipcMain.handle('dialog:openAudio', async () => {
   return res.filePaths[0]
 })
 ipcMain.handle('dialog:openAudioFiles', async () => {
+  const stub = e2eDialog('openAudioFiles'); if (stub) return stub.value
   const res = await dialog.showOpenDialog({ title: 'Chọn các đoạn âm thanh', properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }] })
   return res.canceled ? [] : res.filePaths
@@ -616,6 +627,7 @@ ipcMain.handle('dialog:openVideos', async () => {
 })
 
 ipcMain.handle('dialog:openImportMedia', async () => {
+  const stub = e2eDialog('openImportMedia'); if (stub) return stub.value
   const res = await dialog.showOpenDialog({
     title: 'Nhập video hoặc ảnh', properties: ['openFile', 'multiSelections'],
     filters: [
@@ -672,7 +684,7 @@ ipcMain.handle('export:cancel', (_event, jobId) => ops.cancelJob(jobId))
 ipcMain.handle('video:export', async (event, opts) => {
   const sourcePaths = [
     ...(Array.isArray(opts?.clips) ? opts.clips.map((clip) => clip?.input) : []),
-    ...(Array.isArray(opts?.videoOverlays) ? opts.videoOverlays.map((item) => item?.path) : []),
+    ...(Array.isArray(opts?.videoOverlays) ? opts.videoOverlays.filter((item) => !item?.sticker).map((item) => item?.path) : []),
     ...(Array.isArray(opts?.audioItems) ? opts.audioItems.map((item) => item?.path) : []),
     ...(opts?.music ? [opts.music.path] : []), ...(opts?.voice ? [opts.voice.path] : []),
     ...(opts?.bgAudio ? [opts.bgAudio] : [])
@@ -817,8 +829,10 @@ async function runExport(event, opts) {
     if (hasVideoOverlays) {
       stage('composite')
       const dims = await ops.probe(cur)
+      // Sticker: asar khong doc duoc bang ffmpeg, copy PNG ra thu muc tam truoc
+      const stickerBase = app.isPackaged ? path.join(__dirname, '..', 'dist') : path.join(__dirname, '..', 'src', 'renderer', 'public')
       await ops.compositeVideoOverlays({
-        input: cur, overlays: opts.videoOverlays, output: opts.output,
+        input: cur, overlays: stickers.materializeStickers(opts.videoOverlays, tmpDir, stickerBase), output: opts.output,
         onProgress: (pct) => stageReport(pct)
       })
       si++

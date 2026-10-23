@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 // Cau noi an toan giua UI (React) va Node/FFmpeg (main process).
 // UI chi goi duoc dung nhung ham duoc khai bao o day.
 contextBridge.exposeInMainWorld('taoclip', {
+  platform: process.platform,
   openVideo: () => ipcRenderer.invoke('dialog:openVideo'),
   getEncoder: () => ipcRenderer.invoke('system:encoder'),
   openVideos: () => ipcRenderer.invoke('dialog:openVideos'),

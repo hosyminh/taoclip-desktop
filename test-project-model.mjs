@@ -138,6 +138,20 @@ assert.throws(() => normalizeProject({ version: 3, filterIntensity: 101, clips: 
 const transitionProject = normalizeProject({ version: 3, transition: 'cross', transitionDuration: 1.2, clips: [] }, () => 'transition-test')
 assert.deepEqual([transitionProject.transition, transitionProject.transitionDuration], ['cross', 1.2])
 assert.throws(() => normalizeProject({ version: 3, transitionDuration: 3, clips: [] }), /transitionDuration/)
+const styleProject = normalizeProject({ version: 3, transition: 'cross', transitionStyle: 'wipeleft', clips: [] }, () => 'style-test')
+assert.equal(styleProject.transitionStyle, 'wipeleft')
+assert.equal(normalizeProject({ version: 3, clips: [] }, () => 'style-default').transitionStyle, 'fade')
+assert.equal(normalizeProject({ version: 3, transitionStyle: 'nope', clips: [] }, () => 'style-bad').transitionStyle, 'fade')
+const stickerProject = normalizeProject({ version: 3, clips: [], videoOverlays: [{ id: 'st1', sticker: 'twemoji/1f600', start: 1, out: 2, x: 0.3, y: 0.4, width: 0.2, height: 0.2 }] }, () => 'sticker-test')
+assert.deepEqual([stickerProject.videoOverlays[0].kind, stickerProject.videoOverlays[0].path, stickerProject.videoOverlays[0].sticker], ['image', '', 'twemoji/1f600'])
+assert.throws(() => normalizeProject({ version: 3, clips: [], videoOverlays: [{ sticker: '../secret', start: 0, out: 1 }] }, () => 'sticker-test'), /sticker/)
+// Emoji chu cu co sticker -> V2; emoji khong co sticker va overlay chu giu nguyen
+const emojiMigration = normalizeProject({ version: 3, clips: [], overlays: [
+  { id: 'old-fire', type: 'emoji', text: '🔥', start: 0.5, end: 2.5, x: 0.4, y: 0.6, size: 0.12 },
+  { id: 'old-dino', type: 'emoji', text: '🦖', start: 0, end: 1, x: 0.5, y: 0.5, size: 0.1 },
+  { id: 'old-text', type: 'text', text: 'hi', start: 0, end: 1, x: 0.5, y: 0.5, size: 0.07 }] }, () => 'sticker-test')
+assert.deepEqual(emojiMigration.videoOverlays.map(({ id, sticker, start, out, width }) => [id, sticker, start, out, width]), [['old-fire', 'twemoji/1f525', 0.5, 2, 0.12]])
+assert.deepEqual(emojiMigration.overlays.map((o) => o.id), ['old-dino', 'old-text'])
 const overlayProject = normalizeProject({ version: 3, clips: [], overlays: [{ id: 'text1', text: 'Xin chào\n{đẹp} \\ test', start: 0.25, end: 1.5, x: 0.2, y: 0.7, align: 'right', zIndex: 4 }] }, () => 'overlay-test')
 assert.deepEqual([overlayProject.overlays[0].align, overlayProject.overlays[0].zIndex, overlayProject.overlays[0].x], ['right', 4, 0.2])
 const overlayAss = captionsModule.toAss([{ start: 0.25, end: 1.5, text: 'Xin chào\n{đẹp} \\ test', pos: { x: 216, y: 1344 }, fs: 120, align: 'right', layer: 4 }], { width: 1080, height: 1920 })
@@ -183,9 +197,11 @@ assert.deepEqual(mapTimelineRangeToSources(t02Plan, 2.4, 3.6).map(({ clipId, sta
 const legacy = normalizeProject({ version: 1, clips: [{ path: 'C:/media/a.mp4', in: 2, out: 6, speed: 2 }],
   bgAudio: { kind: 'tts', path: 'C:/voice.wav', name: 'voice' }, bgVolume: 0.7,
   captions: [{ start: 3, end: 4, text: 'hello' }] }, makeId)
-assert.equal(legacy.version, 4)
+assert.equal(legacy.version, 5)
 assert.equal(legacy.captionTimebase, 'source-legacy')
-assert.equal(legacy.voice.path, 'C:/voice.wav')
+assert.equal(legacy.voice, null, 'v5 no longer keeps a separate voice slot')
+assert.equal(legacy.audioItems[0].path, 'C:/voice.wav')
+assert.equal(legacy.audioItems[0].trackId, 'A2', 'migrated voice goes to the first free audio track after A1')
 assert.equal(legacy.clips[0].id, 'clip_1')
 assert.equal(legacy.captions[0].id, 'caption_2')
 assert.equal(legacy.clips[0].speed, 2)

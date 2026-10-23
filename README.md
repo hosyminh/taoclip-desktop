@@ -40,6 +40,8 @@ npm run test:face
 
 `npm test` chạy kiểm tra schema/timeline, kiểm tra tĩnh renderer (lỗi dùng biến trước khi khai báo làm trắng màn hình lúc mở app, khóa i18n thiếu) và bộ test engine FFmpeg. Chưa có test giao diện tự động; cần thao tác thử trong Electron trước khi phát hành.
 
+`npm run test:e2e` mở app Electron thật (bản build trong `dist/`, userData riêng) và điều khiển bằng chuột, thả file và xuất MP4 thật qua Chrome DevTools Protocol. Test này mở cửa sổ app nên không nằm trong `npm test`; thêm `--skip-build` nếu `dist/` vừa build, hoặc một từ khóa để chỉ chạy kịch bản khớp tên.
+
 Một số kiểm tra AI/tải xuống cần Internet và có thể tải file lớn.
 
 ## Đóng gói Windows
@@ -61,6 +63,10 @@ Chỉ tải media bạn có quyền sử dụng. Chỉ dùng tính năng đổi 
 ## Đóng góp và báo lỗi
 
 Mở issue hoặc pull request trên GitHub. Khi báo lỗi, ghi phiên bản app, phiên bản Windows, thao tác tái hiện và trạng thái CPU/GPU. Không đính kèm API key, dữ liệu riêng tư hoặc media nhạy cảm.
+
+## Ghi công
+
+Bộ sticker trong `src/renderer/public/stickers/twemoji/` lấy từ [Twemoji](https://github.com/jdecked/twemoji) (Twitter, Inc. và cộng sự). Hình ảnh được phát hành theo [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), khác với code MIT của dự án. Nếu bạn phân phối lại các sticker này, giữ ghi công Twemoji.
 
 ## License
 

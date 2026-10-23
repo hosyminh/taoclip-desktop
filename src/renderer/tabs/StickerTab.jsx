@@ -1,20 +1,42 @@
 import React from 'react'
 import { X } from 'lucide-react'
 import { useI18n } from '../i18n.jsx'
+import { STICKER_GROUPS, stickerUrl } from '../sticker-catalog.js'
 
-const EMOJIS = ['😀', '😂', '😍', '😎', '🥰', '😱', '🤔', '👍', '👏', '🙌', '🔥', '✨', '⭐', '❤️', '💯', '🎉', '🎬', '📌', '✅', '❌', '⚡', '💡', '🚀', '🏆']
-
-// Tab Sticker: luoi emoji + danh sach sticker da them
-export default function StickerTab({ hasClips, overlays, selOv, setSelOv, addEmoji, updateOverlay, delOverlay, moveOverlayLayer = () => {}, setOverlayBoundaryAtPlayhead = () => {}, seekGlobal, current, beginEdit = () => {}, endEdit = () => {} }) {
+// Tab Sticker: luoi sticker anh (Twemoji) -> them vao track V2; sticker da them tren V2 (co kich thuoc, xoa); emoji chu cu chua doi duoc
+export default function StickerTab({ hasClips, overlays, selOv, setSelOv, addSticker, videoOverlays = [], updateVideoOverlay, delVideoOverlay, updateOverlay, delOverlay, moveOverlayLayer = () => {}, setOverlayBoundaryAtPlayhead = () => {}, seekGlobal, current, beginEdit = () => {}, endEdit = () => {} }) {
   const { t } = useI18n()
+  const stickers = videoOverlays.filter((item) => item.sticker)
   return (
     <div className="cc-cap">
       <label className="grp-lbl">{t('sticker_pick')}</label>
-      <div className="emoji-grid">
-        {EMOJIS.map((em) => (
-          <button key={em} className="emoji-btn" onClick={() => addEmoji(em)} disabled={!hasClips}>{em}</button>
-        ))}
-      </div>
+      {STICKER_GROUPS.map((group) => (
+        <React.Fragment key={group.key}>
+          <small className="sticker-group">{t(group.key)}</small>
+          <div className="sticker-grid">
+            {group.items.map((item) => (
+              <button key={item.id} className="sticker-btn" title={item.char} onClick={() => addSticker(item.id)} disabled={!hasClips}>
+                <img src={stickerUrl(item.id)} alt={item.char} loading="lazy" draggable={false} />
+              </button>
+            ))}
+          </div>
+        </React.Fragment>
+      ))}
+      {stickers.length > 0 && <>
+        <label className="grp-lbl">{t('sticker_on_v2')}</label>
+        <div className="cap-list">
+          {stickers.map((item) => (
+            <div key={item.id} className="ov-row" onClick={() => seekGlobal(item.start)}>
+              <img className="sticker-thumb" src={stickerUrl(item.sticker)} alt={item.name} draggable={false} />
+              <div className="ov-sub">
+                <span>{t('ov_size')}</span><input type="range" min={0.05} max={0.6} step={0.01} value={item.width} onMouseDown={beginEdit} onFocus={beginEdit} onBlur={endEdit}
+                  onChange={(e) => updateVideoOverlay(item.id, { width: Number(e.target.value), height: Number(e.target.value) })} />
+              </div>
+              <button className="cap-del" onClick={(e) => { e.stopPropagation(); delVideoOverlay(item.id) }}><X size={13} /></button>
+            </div>
+          ))}
+        </div>
+      </>}
       <div className="cap-list">
         {overlays.filter((o) => o.type === 'emoji').map((o) => (
           <div key={o.id} className={`ov-row ${selOv === o.id ? 'on' : ''}`} onClick={() => { setSelOv(o.id); seekGlobal(o.start) }}>

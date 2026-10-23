@@ -15,6 +15,8 @@ import AudioTab from './tabs/AudioTab.jsx'
 import FilterTab from './tabs/FilterTab.jsx'
 import StickerTab from './tabs/StickerTab.jsx'
 import TransTab from './tabs/TransTab.jsx'
+import { DEFAULT_TRANSITION_STYLE } from './transition-styles.js'
+import { stickerChar } from './sticker-catalog.js'
 import Inspector from './Inspector.jsx'
 import ExportDialog from './ExportDialog.jsx'
 import TopBar from './TopBar.jsx'
@@ -180,6 +182,7 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem('taoclip_quality', quality); localStorage.setItem('taoclip_resolution', resolution) } catch {} }, [quality, resolution])
   const [transition, setTransition] = useState('none') // none | fade | cross
   const [transitionDuration, setTransitionDuration] = useState(0.5)
+  const [transitionStyle, setTransitionStyle] = useState(DEFAULT_TRANSITION_STYLE) // kieu xfade khi transition = cross
   const [dragInsert, setDragInsert] = useState(null)
   // xuat
   const [exporting, setExporting] = useState(false)
@@ -469,7 +472,7 @@ export default function App() {
     return {
       selectedClipId: selId, selectedOverlayId: selOv, activeClipId: clips[activeIdx]?.id || null, activeClipIndex: activeIdx,
       clips: snapshotHistoryClips(clips), libraryAssets, overlays, videoOverlays, audioItems, captions, captionTimebase, music, voice, bgDur, voiceDur, voiceOffset,
-      ratio, filterKey, filterIntensity, mode, transition, transitionDuration, burnCaptions,
+      ratio, filterKey, filterIntensity, mode, transition, transitionStyle, transitionDuration, burnCaptions,
       musicVol, voiceVol, origVolume, ducking, bgLoop, syncMode, slideDur,
       ttsEngine, ttsVoice, ttsRate, ttsPitch, keepSegments, autoCut, autoInfo, aiEdited, silenceParams
     }
@@ -515,7 +518,7 @@ export default function App() {
     if (s.voice?.path) loadTrackWave('voice', s.voice.path)
     setBgDur(s.bgDur ?? 0); setVoiceDur(s.voiceDur ?? 0); setVoiceOffset(s.voiceOffset ?? 0)
     setRatio(s.ratio || '9:16'); setFilterKey(s.filterKey || 'none'); setFilterIntensity(s.filterIntensity ?? 100); setMode(s.mode || 'smart')
-    setTransition(s.transition || 'none'); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
+    setTransition(s.transition || 'none'); setTransitionStyle(s.transitionStyle || DEFAULT_TRANSITION_STYLE); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
     setMusicVol(s.musicVol ?? 0.4); setVoiceVol(s.voiceVol ?? 1); setOrigVolume(s.origVolume ?? 1)
     setDucking(s.ducking !== false); setBgLoop(s.bgLoop !== false); setSyncMode(s.syncMode || 'fit'); setSlideDur(s.slideDur ?? 3)
     setTtsEngine(s.ttsEngine || 'local'); setTtsVoice(s.ttsVoice || ''); setTtsRate(s.ttsRate ?? 1); setTtsPitch(s.ttsPitch ?? 0)
@@ -566,6 +569,7 @@ export default function App() {
     if (duration === transitionDuration) return
     setTransitionDuration(duration); setCaptions((items) => remapAnchoredCaptions(clips, items, transition, autoCut, keepSegments, duration))
   }
+  function changeTransitionStyle(value) { if (value !== transitionStyle) { pushHistory(); setTransitionStyle(value) } }
   function changeMode(value) { if (value !== mode) { pushHistory(); setMode(value) } }
   function changeBurnCaptions(value) { if (value !== burnCaptions) { pushHistory(); setBurnCaptions(value) } }
   function changeSyncMode(value) { if (value !== syncMode) { pushHistory(); setSyncMode(value) } }
@@ -1776,7 +1780,16 @@ export default function App() {
     setOverlays((os) => [...os, base]); setSelOv(id)
   }
   function addText() { addOverlay({ type: 'text', text: t('ov_default_text'), size: 0.07, color: '#ffffff' }) }
-  function addEmoji(em) { addOverlay({ type: 'emoji', text: em, size: 0.14, color: null, y: 0.5 }) }
+  // Sticker Twemoji la anh tinh tren track V2, bat dau tai playhead; kich thuoc la fraction cua canh ngan nhat khung
+  function addStickerToV2(id) {
+    if (!id) return
+    pushHistory()
+    setVideoOverlays((items) => [...items, {
+      id: makeEntityId('sticker'), sticker: id, path: '', name: stickerChar(id) || id, kind: 'image',
+      start: current, in: 0, out: 3, speed: 1, x: 0.5, y: 0.5, width: 0.2, height: 0.2, opacity: 1,
+      zIndex: videoOverlays.length, animated: false, missing: false
+    }])
+  }
   function updateOverlay(id, patch) {
     setOverlays((os) => os.map((o) => {
       if (o.id !== id) return o
@@ -1824,6 +1837,7 @@ export default function App() {
     })
   }
   function delOverlay(id) { pushHistory(); setOverlays((os) => os.filter((o) => o.id !== id)); if (selOv === id) setSelOv(null) }
+  function delVideoOverlay(id) { pushHistory(); setVideoOverlays((items) => items.filter((item) => item.id !== id)) }
   function startOverlayDrag(o, e) {
     e.stopPropagation(); setSelOv(o.id)
     const frame = e.currentTarget.closest('.cc-frame'); if (!frame) return
@@ -1845,7 +1859,7 @@ export default function App() {
     const legacyAudioItems = getProjectAudioItems()
     return normalizeProject({
       version: 4, projectId: projectIdRef.current, captionTimebase, ratio, filterKey, filterIntensity, mode, captions, burnCaptions, overlays, videoOverlays, assets: libraryAssets,
-      audioItems: legacyAudioItems, transition, transitionDuration,
+      audioItems: legacyAudioItems, transition, transitionStyle, transitionDuration,
       clips: clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
       music, voice, musicVol, voiceVol, ducking, bgDur, voiceDur, voiceOffset, origVolume, bgLoop, syncMode, slideDur,
       ttsEngine, ttsVoice, ttsRate, ttsPitch, aiEdited, keepSegments, autoCut, autoInfo, silenceParams
@@ -1896,6 +1910,7 @@ export default function App() {
       }
     }
     const loadedVideoOverlays = await Promise.all(project.videoOverlays.map(async (item) => {
+      if (item.sticker) return { ...item, missing: false }
       try { await window.taoclip.probe(item.path); return { ...item, missing: false } }
       catch { return { ...item, missing: true } }
     }))
@@ -1909,7 +1924,7 @@ export default function App() {
     }))
     const referencedAssets = [
       ...built.map((item) => ({ path: item.path, missing: item.missing, metadata: item.src })),
-      ...loadedVideoOverlays.map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
+      ...loadedVideoOverlays.filter((item) => !item.sticker).map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
       ...loadedAudioItems.map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
       ...(project.music?.path ? [{ path: project.music.path, missing: loadedTracks.find((item) => normalizeMediaPath(item.path) === normalizeMediaPath(project.music.path))?.missing ?? true, metadata: { duration: project.bgDur } }] : []),
       ...(project.voice?.path ? [{ path: project.voice.path, missing: loadedTracks.find((item) => normalizeMediaPath(item.path) === normalizeMediaPath(project.voice.path))?.missing ?? true, metadata: { duration: project.voiceDur } }] : [])
@@ -1945,8 +1960,8 @@ export default function App() {
       loadedTimebase = 'timeline'
     }
     setCaptions(loadedCaptions); setCaptionTimebase(loadedTimebase); setBurnCaptions(project.burnCaptions)
-    setOverlays(project.overlays); setSelOv(null); setTransition(project.transition)
-    setVideoOverlays(loadedVideoOverlays); setAudioItems(loadedAudioItems.filter((item) => item.id !== 'legacy-music' && item.id !== 'legacy-voice'))
+    setOverlays(project.overlays); setSelOv(null); setTransition(project.transition); setTransitionStyle(project.transitionStyle)
+    setVideoOverlays(loadedVideoOverlays); setAudioItems(loadedAudioItems)
     // v2: music/voice rieng; v1 (cu): bgAudio 1 track kind music|tts
     const m = project.music, vo = project.voice
     commitMusic(m); commitVoice(vo); setMusicVol(project.musicVol); setVoiceVol(project.voiceVol); setDucking(project.ducking)
@@ -2128,8 +2143,8 @@ export default function App() {
           jobId, clips: clipPayload, editPlan: toExportSegments(timelinePlan), output: o, ratio: r, mode, filterKey, filterIntensity, segments,
           captions, burnCaptions: burnCaptions && captions.length > 0,
           overlays: overlays.map((o) => ({ type: o.type, text: o.text, start: o.start, end: o.end, x: o.x, y: o.y, size: o.size, color: o.type === 'text' ? o.color : null, align: o.align || 'center', zIndex: o.zIndex || 0 })),
-          videoOverlays: videoOverlays.map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name }) => ({
-            path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name
+          videoOverlays: videoOverlays.map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker }) => ({
+            path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker
           })),
           music: music ? { path: music.path, volume: musicVol, loop: bgLoop } : undefined,
           voice: voice ? { path: voice.path, volume: voiceVol, offset: voiceOffset } : undefined,
@@ -2137,7 +2152,7 @@ export default function App() {
           origVolume, ducking, aiEdited,
           captionTimebase,
           useGpu, quality, resolution, transition: clips.length > 1 && transition !== 'none'
-            ? { type: transition === 'cross' ? 'crossfade' : 'fade', dur: transitionDuration } : undefined
+            ? { type: transition === 'cross' ? 'crossfade' : 'fade', dur: transitionDuration, style: transitionStyle } : undefined
         })
         if (res && res.cancelled) { setStatus(t('export_cancelled')); notify(t('export_cancelled')); return }
         if (i === ratios.length - 1) {
@@ -2231,10 +2246,11 @@ export default function App() {
               faceBusy={faceBusy} faceStatus={faceStatus} cancelFaceOperation={cancelFaceOperation} applyFaceSwap={applyFaceSwap} previewFaceSwap={previewFaceSwap} facePreviewPath={facePreviewPath} pickFaceImage={pickFaceImage} />
           ) : tab === 'sticker' ? (
             <StickerTab hasClips={hasClips} overlays={overlays} selOv={selOv} setSelOv={setSelOv}
-              addEmoji={addEmoji} updateOverlay={updateOverlay} delOverlay={delOverlay} moveOverlayLayer={moveOverlayLayer} setOverlayBoundaryAtPlayhead={setOverlayBoundaryAtPlayhead} seekGlobal={seekGlobal} current={current}
+              addSticker={addStickerToV2} videoOverlays={videoOverlays} updateVideoOverlay={updateVideoOverlay} delVideoOverlay={delVideoOverlay}
+              updateOverlay={updateOverlay} delOverlay={delOverlay} moveOverlayLayer={moveOverlayLayer} setOverlayBoundaryAtPlayhead={setOverlayBoundaryAtPlayhead} seekGlobal={seekGlobal} current={current}
               beginEdit={beginHistoryEdit} endEdit={endHistoryEdit} pushHistory={pushHistory} />
           ) : tab === 'trans' ? (
-            <TransTab clipCount={clips.length} transition={transition} setTransition={changeTransition}
+            <TransTab clipCount={clips.length} transition={transition} setTransition={changeTransition} style={transitionStyle} setStyle={changeTransitionStyle}
               duration={transitionDuration} setDuration={changeTransitionDuration} beginEdit={beginHistoryEdit} endEdit={endHistoryEdit}
               clampedCount={timelinePlan.entries.filter((entry) => entry.transitionIn === 'cross' && entry.overlapIn + 0.001 < transitionDuration).length}
               effectiveMin={timelinePlan.entries.filter((entry) => entry.transitionIn === 'cross').reduce((min, entry) => Math.min(min, entry.overlapIn), Infinity)} />
