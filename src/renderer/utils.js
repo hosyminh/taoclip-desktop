@@ -9,7 +9,8 @@ export function fmt(t) {
   const m = Math.floor(t / 60), s = Math.floor(t % 60), f = Math.floor((t % 1) * 30)
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(f).padStart(2, '0')}`
 }
-export const fileUrl = (p) => 'file:///' + encodeURI(p.replace(/\\/g, '/')).replace(/#/g, '%23').replace(/\?/g, '%3F')
+// URL cho media cuc bo: giao thuc taoclip-media:// do main process phuc vu (xem electron/main.cjs); khong dung file:// vi dev (http://localhost) bi chan
+export const fileUrl = (p) => 'taoclip-media://local/' + encodeURI(p.replace(/\\/g, '/')).replace(/#/g, '%23').replace(/\?/g, '%3F')
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 export const FRAME = 1 / 30
 export const SPEEDS = [0.5, 1, 1.5, 2, 4]

@@ -97,7 +97,7 @@ export default function EffectTab({
         <button className="cc-import" onClick={async () => { const p = await pickFaceImage(); if (p) setFaceImg(p) }} disabled={busy}>
           <ImageIcon size={14} /> {faceImg ? faceImg.split(/[\\/]/).pop() : t('face_pick')}
         </button>
-        {faceImg && <img className="face-preview" src={'file:///' + encodeURI(faceImg.replace(/\\/g, '/'))} alt="" />}
+        {faceImg && <img className="face-preview" src={fileUrl(faceImg)} alt="" />}
         <label className="chk consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} disabled={busy} /> {t('face_consent')}</label>
         <small className="cap-hint">{t('face_model_license_hint')}</small>
         <label className="chk consent"><input type="checkbox" checked={faceModelTermsAccepted} onChange={(e) => setFaceModelTermsAccepted(e.target.checked)} disabled={busy} /> {t('face_model_license_accept')}</label>

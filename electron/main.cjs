@@ -1,7 +1,28 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, protocol, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
+const { pathToFileURL } = require('url')
+
+// Media/thumbnail cuc bo duoc phuc vu qua taoclip-media:// thay vi file://.
+// Khi chay dev, trang la http://localhost:5173 nen Chromium chan nap file:// ("Media load rejected by URL safety check");
+// giao thuc rieng nay chay giong nhau o dev va ban dong goi. Phai dang ky truoc khi app ready.
+const MEDIA_SCHEME = 'taoclip-media'
+const MEDIA_EXT = /\.(mp4|mov|mkv|avi|webm|m4v|ts|mp3|wav|m4a|aac|ogg|flac|wma|jpe?g|png|webp|bmp|gif)$/i
+protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
+
+function registerMediaProtocol() {
+  protocol.handle(MEDIA_SCHEME, async (request) => {
+    try {
+      const filePath = decodeURIComponent(new URL(request.url).pathname.slice(1))
+      if (!path.isAbsolute(filePath) || !MEDIA_EXT.test(filePath)) return new Response('Forbidden', { status: 403 })
+      // Chuyen tiep header (Range) de tua video/audio hoat dong
+      return await net.fetch(pathToFileURL(filePath).toString(), { headers: request.headers })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
 
 // --- FFmpeg / FFprobe (dong goi san, khong can cai he thong) ---
 const os = require('os')
@@ -67,6 +88,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  registerMediaProtocol()
   createWindow()
   ops.detectBestEncoder().then((e) => { gpuEncoder = e }).catch(() => {})
   app.on('activate', () => {

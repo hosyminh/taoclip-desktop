@@ -53,6 +53,15 @@ for (const [file, ast] of asts) {
 }
 check('renderer khong dung const/let truoc khi khai bao luc render (TDZ)', tdz.length === 0, tdz)
 
+// 1b) Media cuc bo phai di qua fileUrl() (taoclip-media://); file:// bi chan khi chay dev (http://localhost)
+const rawFileUrls = []
+for (const file of sources) {
+  fs.readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+    if (/['"`]file:\/\//.test(line)) rawFileUrls.push(`${path.relative(__dirname, file)}:${index + 1}: ${line.trim().slice(0, 100)}`)
+  })
+}
+check('renderer khong tu dung URL file:// (dung fileUrl() -> taoclip-media://)', rawFileUrls.length === 0, rawFileUrls)
+
 // 2) Khoa i18n
 const i18nFile = path.join(rendererDir, 'i18n.jsx')
 const dictionaries = {}
