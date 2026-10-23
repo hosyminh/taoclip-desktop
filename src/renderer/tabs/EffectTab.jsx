@@ -48,20 +48,20 @@ export default function EffectTab({
 
       <Sec id="bg" title={t('ai_bg_title')} acc={acc} setAcc={setAcc}>
         <small className="cap-hint">{t('ai_bg_hint')}</small>
-        <small className="cap-hint">Model RVM: {aiModelStatus?.state === 'cached' ? 'đã tải và lưu trên máy' : aiModelStatus?.state === 'bundled' ? 'có sẵn trong ứng dụng' : aiModelStatus?.state === 'not-cached' ? 'chưa tải; cần kết nối mạng lần đầu' : 'đang kiểm tra'}{aiModelStatus?.bytes ? ` · ${(aiModelStatus.bytes / 1e6).toFixed(1)} MB` : ''}</small>
-        <button className="cc-mini" onClick={ensureAiModel} disabled={busy || aiModelStatus?.available}>{aiModelStatus?.available ? 'Model đã sẵn sàng' : 'Tải model / Thử lại'}</button>
-        {aiBusy && <button className="cc-mini" onClick={cancelAiOperation}>Hủy tác vụ thay nền</button>}
-        <label className="vlbl">Chất lượng xử lý</label>
+        <small className="cap-hint">{t('ai_rvm_label')}: {aiModelStatus?.state === 'cached' ? t('ai_state_cached') : aiModelStatus?.state === 'bundled' ? t('ai_state_bundled') : aiModelStatus?.state === 'not-cached' ? t('ai_state_missing') : t('ai_state_checking')}{aiModelStatus?.bytes ? ` · ${(aiModelStatus.bytes / 1e6).toFixed(1)} MB` : ''}</small>
+        <button className="cc-mini" onClick={ensureAiModel} disabled={busy || aiModelStatus?.available}>{aiModelStatus?.available ? t('ai_model_ready') : t('ai_model_download')}</button>
+        {aiBusy && <button className="cc-mini" onClick={cancelAiOperation}>{t('ai_cancel_bg')}</button>}
+        <label className="vlbl">{t('ai_proc_quality')}</label>
         <select className="cc-select" value={aiProcWidth} onChange={(event) => setAiProcWidth(Number(event.target.value))} disabled={busy}>
-          <option value={384}>Nhanh · 384 px</option><option value={640}>Cân bằng · 640 px</option><option value={960}>Chi tiết · 960 px</option>
+          <option value={384}>{t('ai_q_fast')} · 384 px</option><option value={640}>{t('ai_q_balanced')} · 640 px</option><option value={960}>{t('ai_q_detail')} · 960 px</option>
         </select>
         {ready && <>
           <div className="key-row">
-            <label>Preview từ nguồn (s) <input type="number" min={selectedClip.in} max={Math.max(selectedClip.in, selectedClip.out - 1)} step="0.1" value={aiPreviewStart} disabled={busy}
+            <label>{t('ai_preview_from')} <input type="number" min={selectedClip.in} max={Math.max(selectedClip.in, selectedClip.out - 1)} step="0.1" value={aiPreviewStart} disabled={busy}
               onChange={(event) => setAiPreviewStart(Math.max(selectedClip.in, Math.min(selectedClip.out - 1, Number(event.target.value) || selectedClip.in)))} /></label>
-            <label>Thời lượng <select value={aiPreviewDuration} disabled={busy} onChange={(event) => setAiPreviewDuration(Number(event.target.value))}><option value={1}>1s</option><option value={2}>2s</option><option value={3}>3s</option></select></label>
+            <label>{t('ai_preview_len')} <select value={aiPreviewDuration} disabled={busy} onChange={(event) => setAiPreviewDuration(Number(event.target.value))}><option value={1}>1s</option><option value={2}>2s</option><option value={3}>3s</option></select></label>
           </div>
-          <button className="cc-mini" onClick={() => previewReplaceBg(bg)} disabled={busy || selectedClip.out - selectedClip.in < 1}>Dựng preview (clip gốc giữ nguyên)</button>
+          <button className="cc-mini" onClick={() => previewReplaceBg(bg)} disabled={busy || selectedClip.out - selectedClip.in < 1}>{t('ai_build_preview')}</button>
           {aiPreviewPath && <video className="face-preview" src={fileUrl(aiPreviewPath)} controls preload="metadata" />}
         </>}
         <label className="vlbl">{t('ai_bg_mode')}</label>
@@ -103,17 +103,17 @@ export default function EffectTab({
         <label className="chk consent"><input type="checkbox" checked={faceModelTermsAccepted} onChange={(e) => setFaceModelTermsAccepted(e.target.checked)} disabled={busy} /> {t('face_model_license_accept')}</label>
         {ready && <>
           <div className="key-row">
-            <label>Preview từ nguồn (s) <input type="number" min={selectedClip.in} max={Math.max(selectedClip.in, selectedClip.out - 1)} step="0.1" value={aiPreviewStart} disabled={busy}
+            <label>{t('ai_preview_from')} <input type="number" min={selectedClip.in} max={Math.max(selectedClip.in, selectedClip.out - 1)} step="0.1" value={aiPreviewStart} disabled={busy}
               onChange={(event) => setAiPreviewStart(Math.max(selectedClip.in, Math.min(selectedClip.out - 1, Number(event.target.value) || selectedClip.in)))} /></label>
-            <label>Thời lượng <select value={aiPreviewDuration} disabled={busy} onChange={(event) => setAiPreviewDuration(Number(event.target.value))}><option value={1}>1s</option><option value={2}>2s</option><option value={3}>3s</option></select></label>
+            <label>{t('ai_preview_len')} <select value={aiPreviewDuration} disabled={busy} onChange={(event) => setAiPreviewDuration(Number(event.target.value))}><option value={1}>1s</option><option value={2}>2s</option><option value={3}>3s</option></select></label>
           </div>
-          <button className="cc-mini" onClick={() => previewFaceSwap(faceImg)} disabled={busy || !faceImg || !consent || !faceModelTermsAccepted || selectedClip.out - selectedClip.in < 1}>Dựng preview đổi mặt (clip gốc giữ nguyên)</button>
+          <button className="cc-mini" onClick={() => previewFaceSwap(faceImg)} disabled={busy || !faceImg || !consent || !faceModelTermsAccepted || selectedClip.out - selectedClip.in < 1}>{t('face_build_preview')}</button>
           {facePreviewPath && <video className="face-preview" src={fileUrl(facePreviewPath)} controls preload="metadata" />}
         </>}
         <button className="cc-auto" disabled={!canFace} onClick={() => applyFaceSwap(faceImg)}>
           {faceBusy ? (faceStatus || '...') : t('face_apply')}
         </button>
-        {faceBusy && <button className="cc-mini" onClick={cancelFaceOperation}>Hủy tác vụ đổi mặt</button>}
+        {faceBusy && <button className="cc-mini" onClick={cancelFaceOperation}>{t('face_cancel')}</button>}
         {!faceBusy && faceStatus && <small className="cap-hint">{faceStatus}</small>}
         <small className="cap-hint">{t('face_dl_hint')}</small>
         <small className="cap-hint">⚠ {t('face_ai_label')}</small>

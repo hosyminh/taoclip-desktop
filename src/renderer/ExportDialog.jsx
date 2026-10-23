@@ -7,6 +7,7 @@ import { fmt } from './utils.js'
 // + man hinh tien do theo giai doan + nut huy
 export default function ExportDialog({
   ratio, extraRatios, toggleExtra, mode, setMode, gpuEnc, useGpu, setUseGpu,
+  quality = 'standard', setQuality = () => {}, resolution = '1080', setResolution = () => {},
   captionsCount, burnCaptions, setBurnCaptions, clipCount, totalDuration,
   hasBurnStage, hasAudioStage,
   exporting, progress, stage, status,
@@ -48,6 +49,22 @@ export default function ExportDialog({
                 <button className={mode === 'accurate' ? 'on' : ''} onClick={() => setMode('accurate')}>{t('mode_accurate')}</button>
               </div>
               {clipCount > 1 && <small>{t('multi_mode_note')}</small>}
+            </div>
+
+            <div className="grp">
+              <label>{t('export_quality')}</label>
+              <div className="seg">
+                {['high', 'standard', 'small'].map((q) => (
+                  <button key={q} className={quality === q ? 'on' : ''} onClick={() => setQuality(q)}>{t('quality_' + q)}</button>
+                ))}
+              </div>
+              <label className="vlbl">{t('export_resolution')}</label>
+              <div className="seg">
+                {['720', '1080', '1440'].map((r) => (
+                  <button key={r} className={resolution === r ? 'on' : ''} onClick={() => setResolution(r)} disabled={ratio === 'original' && extraRatios.length === 0}>{r}p</button>
+                ))}
+              </div>
+              <small>{ratio === 'original' ? t('res_original_note') + ' ' : ''}{t('export_quality_note')}</small>
             </div>
 
             {gpuEnc !== 'cpu' && (

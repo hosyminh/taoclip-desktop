@@ -12,7 +12,7 @@
 - Dựng timeline nhiều lớp, thêm chữ, sticker, phụ đề, nhạc nền và chuyển cảnh.
 - Phân tích khoảng lặng, tạo phụ đề, đọc văn bản và xử lý nền bằng các model AI tải riêng.
 - Lưu/mở project, relink media, thu thập media để chuyển project, undo/redo và khôi phục phiên.
-- Xuất MP4 bằng CPU hoặc encoder GPU khả dụng, chọn chất lượng và xuất nhiều tỉ lệ.
+- Xuất MP4 bằng CPU hoặc encoder GPU khả dụng, chọn chất lượng (Cao/Chuẩn/Nhỏ gọn), độ phân giải cạnh ngắn (720/1080/1440) và xuất nhiều tỉ lệ. Tốc độ khung hình xuất cố định 30 fps; tỉ lệ Gốc giữ kích thước của clip đầu tiên.
 - Tải media từ URL, dùng Google Cloud TTS và đổi khuôn mặt là các tính năng tùy chọn cần kết nối/cấu hình phù hợp.
 
 ## Yêu cầu
@@ -38,6 +38,8 @@ npm run test:dl
 npm run test:face
 ```
 
+`npm test` chạy kiểm tra schema/timeline, kiểm tra tĩnh renderer (lỗi dùng biến trước khi khai báo làm trắng màn hình lúc mở app, khóa i18n thiếu) và bộ test engine FFmpeg. Chưa có test giao diện tự động; cần thao tác thử trong Electron trước khi phát hành.
+
 Một số kiểm tra AI/tải xuống cần Internet và có thể tải file lớn.
 
 ## Đóng gói Windows
@@ -51,6 +53,8 @@ Electron Builder tạo installer trong `release/`. Installer chưa ký số nế
 ## Dữ liệu và model bên thứ ba
 
 Video, ảnh, audio và project được xử lý trên máy. Nếu bật Google Cloud TTS, đoạn văn bản bạn chọn sẽ được gửi tới Google để tổng hợp giọng nói. Model AI và công cụ được tải khi chạy có chủ sở hữu và điều khoản riêng; MIT license của mã nguồn TaoClip không cấp quyền phân phối lại các model đó. Hãy kiểm tra điều khoản của từng model trước khi sử dụng hoặc phân phối.
+
+Các thư mục `models/` và `bin/yt-dlp.exe` chỉ là bộ nhớ đệm khi phát triển, không nằm trong git và không được đóng gói vào installer; ứng dụng tải chúng khi cần.
 
 Chỉ tải media bạn có quyền sử dụng. Chỉ dùng tính năng đổi khuôn mặt khi có quyền và sự đồng ý phù hợp.
 

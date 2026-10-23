@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getEntitlements } from './entitlements.js'
-import { useI18n, LANGS } from './i18n.jsx'
+import { useI18n } from './i18n.jsx'
 import {
   Film, Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, Repeat, Volume2, VolumeX,
-  Save, FolderOpen, Undo2, Redo2, Upload, Scissors, Minus, Plus, Music, X, Keyboard, Image, FolderUp, Mic
+  Undo2, Redo2, Upload, Scissors, Minus, Plus, Music, X, Keyboard, Image, FolderUp, Mic
 } from 'lucide-react'
 import {
   fmt, fileUrl, clamp, FRAME, isImg, clipOut, FILTERS, filterPreviewCss, TABS
@@ -17,6 +17,10 @@ import StickerTab from './tabs/StickerTab.jsx'
 import TransTab from './tabs/TransTab.jsx'
 import Inspector from './Inspector.jsx'
 import ExportDialog from './ExportDialog.jsx'
+import TopBar from './TopBar.jsx'
+import ToastStack from './ToastStack.jsx'
+import ShortcutsModal from './ShortcutsModal.jsx'
+import RecoveryBanner from './RecoveryBanner.jsx'
 import VideoOverlayPreview from './VideoOverlayPreview.jsx'
 import AudioItemPreview from './AudioItemPreview.jsx'
 import { normalizeProject } from './project-model.js'
@@ -32,7 +36,7 @@ function makeEntityId(kind) {
 }
 
 export default function App() {
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
   useMemo(() => getEntitlements(), [])
   const videoRef = useRef(null)
   const overlapVideoRef = useRef(null)
@@ -171,6 +175,9 @@ export default function App() {
   // tang toc + chuyen canh + keo-tha sap xep
   const [gpuEnc, setGpuEnc] = useState('cpu')
   const [useGpu, setUseGpu] = useState(true)
+  const [quality, setQuality] = useState(() => { try { const v = localStorage.getItem('taoclip_quality'); return ['high', 'standard', 'small'].includes(v) ? v : 'standard' } catch { return 'standard' } })
+  const [resolution, setResolution] = useState(() => { try { const v = localStorage.getItem('taoclip_resolution'); return ['720', '1080', '1440'].includes(v) ? v : '1080' } catch { return '1080' } })
+  useEffect(() => { try { localStorage.setItem('taoclip_quality', quality); localStorage.setItem('taoclip_resolution', resolution) } catch {} }, [quality, resolution])
   const [transition, setTransition] = useState('none') // none | fade | cross
   const [transitionDuration, setTransitionDuration] = useState(0.5)
   const [dragInsert, setDragInsert] = useState(null)
@@ -322,7 +329,7 @@ export default function App() {
   useEffect(() => {
     window.taoclip.latestRecovery?.().then((record) => {
       if (record?.project) setRecover(record)
-      if (record?.corruptPrevious) notify('Một bản recovery bị lỗi; đã bỏ qua bản lỗi để giữ an toàn dữ liệu.', 'err')
+      if (record?.corruptPrevious) notify(t('msg_recovery_corrupt'), 'err')
     }).catch(() => {})
   }, [])
   // Nho kich thuoc panel
@@ -394,6 +401,25 @@ export default function App() {
       return items.map((clip) => isImg(clip) ? { ...clip, in: 0, out: per } : clip)
     })
   }, [syncMode, fitMusicDuration, hasFitMusic, imageCount, clips, transition, transitionDuration, autoCut, keepSegments])
+
+  // Phai khai bao truoc moi hook co seekGlobal trong mang phu thuoc (const khong duoc hoist: dung som se loi TDZ luc render)
+  const seekGlobal = useCallback((gt) => {
+    gt = clamp(gt, 0, totalDuration || 0)
+    const source = resolvePreviewSource(timelinePlan, gt)
+    const idx = source ? clips.findIndex((c) => c.id === source.clipId) : -1
+    const srcTime = source?.sourceTime
+    if (idx < 0) { setCurrent(gt); return }
+    if (idx !== activeIdx) { pendingSeekRef.current = srcTime; setActiveIdx(idx) }
+    else if (videoRef.current) {
+      if (videoRef.current.readyState >= 1) { try { videoRef.current.currentTime = srcTime } catch { pendingSeekRef.current = srcTime } }
+      else pendingSeekRef.current = srcTime
+    }
+    curRef.current = gt; setCurrent(gt)
+    const a = musicRef.current
+    if (a && bgDur) { try { a.currentTime = bgLoop ? gt % bgDur : Math.min(gt, bgDur) } catch (e) {} }
+    const vv = voiceRef.current
+    if (vv) { try { vv.currentTime = clamp(gt - voiceOffset, 0, vv.duration || voiceDur || 0) } catch (e) {} }
+  }, [timelinePlan, totalDuration, clips, activeIdx, bgDur, bgLoop, voiceDur, voiceOffset])
 
   // ---- Vong phat cho ANH (khong co <video> lam dong ho) ----
   useEffect(() => {
@@ -591,26 +617,26 @@ export default function App() {
     try {
       for (let i = 0; i < inputs.length; i++) {
         if (resourceScopeRef.current !== importScope) {
-          setStatus('Dự án đã đổi trong lúc nhập media; các tệp vừa kiểm tra chưa được thêm vào dự án mới.')
+          setStatus(t('msg_project_changed_import'))
           return { added: 0, stale: true }
         }
         if (cancelImportRef.current) break
         const p = inputs[i], key = normalizeMediaPath(p), name = p.split(/[\\/]/).pop()
         setImportProgress(`${i + 1}/${inputs.length} · ${name}`)
         if (seen.has(key) || (music?.path && normalizeMediaPath(music.path) === key)) {
-          duplicates++; failures.push({ path: name, reason: 'Đã có trong dự án hoặc thư viện.' }); continue
+          duplicates++; failures.push({ path: name, reason: t('msg_already_in_project') }); continue
         }
         seen.add(key)
         try {
           const media = await window.taoclip.inspectMedia(p)
           if (resourceScopeRef.current !== importScope) {
-            setStatus('Dự án đã đổi trong lúc nhập media; các tệp vừa kiểm tra chưa được thêm vào dự án mới.')
+            setStatus(t('msg_project_changed_import'))
             return { added: 0, stale: true }
           }
-          if (!allowedKinds.includes(media.kind)) throw new Error(media.kind === 'audio' ? 'File âm thanh không được hỗ trợ trong thao tác này.' : 'Loại media không phù hợp với thao tác này.')
+          if (!allowedKinds.includes(media.kind)) throw new Error(media.kind === 'audio' ? t('msg_audio_unsupported_here') : t('msg_media_kind_mismatch'))
           if (media.kind === 'audio') {
             if (!musicCandidate) { musicCandidate = { path: p, name }; libraryAdditions.push(makeLibraryAsset(p, 'audio', media)) }
-            else failures.push({ path: name, reason: 'Chỉ có thể chọn một file nhạc trong lần kéo thả này.' })
+            else failures.push({ path: name, reason: t('msg_one_music_only') })
           } else if (media.kind === 'image') {
             libraryAdditions.push(makeLibraryAsset(p, 'image', media))
             built.push({ id: makeEntityId('clip'), kind: 'image', path: p, name,
@@ -626,7 +652,7 @@ export default function App() {
         } catch (error) { failures.push({ path: name, reason: String(error.message || error).slice(0, 240) }) }
       }
       if (resourceScopeRef.current !== importScope) {
-        setStatus('Dự án đã đổi trong lúc nhập media; các tệp vừa kiểm tra chưa được thêm vào dự án mới.')
+        setStatus(t('msg_project_changed_import'))
         return { added: 0, stale: true }
       }
       if (built.length || musicCandidate) {
@@ -656,7 +682,7 @@ export default function App() {
         ...(musicCandidate ? [{ path: musicCandidate.name, ok: true }] : []), ...failures]
       setImportReport(result)
       const cancelled = cancelImportRef.current && built.length < inputs.length
-      setStatus(`${built.length + (musicCandidate ? 1 : 0)} media đã nhập · ${failures.length} bỏ qua${cancelled ? ' · đã hủy' : ''}${duplicates ? ` · ${duplicates} trùng` : ''}`)
+      setStatus(t('msg_import_summary', { n: built.length + (musicCandidate ? 1 : 0), f: failures.length }) + (cancelled ? ` · ${t('msg_cancelled_suffix')}` : '') + (duplicates ? ` · ${t('msg_dup_suffix', { n: duplicates })}` : ''))
       return { added: built.length + (musicCandidate ? 1 : 0), failed: failures.length, cancelled }
     } finally {
       importBusyRef.current = false; cancelImportRef.current = false
@@ -687,7 +713,7 @@ export default function App() {
     setClips((items) => items.map((item) => item.id === id && item.path === mediaPath && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
       ? { ...item, thumbLoading: true, thumbError: false } : item))
     return window.taoclip.thumbnails(mediaPath, 8).then((thumbs) => {
-      if (!thumbs?.length) throw new Error('Không tạo được thumbnail.')
+      if (!thumbs?.length) throw new Error(t('msg_thumb_fail'))
       setClips((items) => items.map((item) => item.id === id && item.path === mediaPath && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
         ? { ...item, thumbs, thumbLoading: false, thumbError: false } : item))
     }).catch(() => setClips((items) => items.map((item) => item.id === id && item.path === mediaPath && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
@@ -701,7 +727,7 @@ export default function App() {
     setClips((items) => items.map((item) => item.id === id && item.path === p && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
       ? { ...item, waveLoading: true, waveError: false } : item))
     window.taoclip.waveform(p).then((wave) => {
-      if (!wave) throw new Error('Không tạo được waveform.')
+      if (!wave) throw new Error(t('msg_wave_fail'))
       setClips((items) => items.map((item) => item.id === id && item.path === p && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
         ? { ...item, wave, waveLoading: false, waveError: false } : item))
     }).catch(() => setClips((items) => items.map((item) => item.id === id && item.path === p && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
@@ -744,7 +770,7 @@ export default function App() {
       x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, zIndex: videoOverlays.length,
       animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false
     }])
-    setStatus('Đã thêm media lên track phủ V2')
+    setStatus(t('msg_added_v2'))
   }
   async function addLibraryAssetToTimeline(asset) {
     if (!asset || asset.missing) { notify(t('media_asset_missing'), 'err'); return }
@@ -863,9 +889,9 @@ export default function App() {
     })
     try {
       const r = await window.taoclip.downloadVideo({ url, maxRes: options.maxRes, outDir: options.outDir || undefined })
-      if (resourceScopeRef.current !== scope) { setDlStatus('Dự án đã đổi; video đã tải chưa được thêm vào dự án mới.'); return false }
+      if (resourceScopeRef.current !== scope) { setDlStatus(t('msg_dl_project_changed')); return false }
       const imported = await addClips([r.path])
-      if (imported?.stale) { setDlStatus('Dự án đã đổi trong lúc kiểm tra video; tệp chưa được thêm.'); return false }
+      if (imported?.stale) { setDlStatus(t('msg_dl_inspect_project_changed')); return false }
       setDlStatus(t('dl_done'))
       return true
     } catch (e) {
@@ -879,13 +905,13 @@ export default function App() {
   async function handleImport() {
     const scope = resourceScopeRef.current
     const ps = await window.taoclip.openImportMedia()
-    if (scope !== resourceScopeRef.current) { if (ps?.length) notify('Dự án đã đổi; media vừa chọn chưa được thêm.', 'err'); return }
+    if (scope !== resourceScopeRef.current) { if (ps?.length) notify(t('msg_pick_media_project_changed'), 'err'); return }
     if (ps?.length) importMedia(ps, ['video', 'image'])
   }
   async function handleImportImages() {
     const scope = resourceScopeRef.current
     const ps = await window.taoclip.openImages()
-    if (scope !== resourceScopeRef.current) { if (ps?.length) notify('Dự án đã đổi; ảnh vừa chọn chưa được thêm.', 'err'); return }
+    if (scope !== resourceScopeRef.current) { if (ps?.length) notify(t('msg_pick_images_project_changed'), 'err'); return }
     if (ps?.length) addImages(ps)
   }
   function onDragOver(e) { e.preventDefault(); setDragOver(true) }
@@ -902,7 +928,7 @@ export default function App() {
     resumePlayRequestedRef.current = false
     setPlaying(false)
     if (error?.name === 'AbortError') return
-    setPreviewError(error?.message || 'Không phát được media xem trước.')
+    setPreviewError(error?.message || t('msg_preview_play_fail'))
   }
   function playPreviewVideo(video) {
     if (!video) return
@@ -919,14 +945,14 @@ export default function App() {
     const mediaError = event.currentTarget.error
     setPreviewLoading(false)
     setPlaying(false)
-    setPreviewError(mediaError?.message || 'Trình duyệt không giải mã được video này.')
+    setPreviewError(mediaError?.message || t('msg_preview_decode_fail'))
   }
   function onPreviewImageLoad() {
     setPreviewLoading(false); setPreviewError('')
     if (resumePlayRequestedRef.current) { resumePlayRequestedRef.current = false; setPlaying(true) }
   }
   function onPreviewImageError() {
-    setPreviewLoading(false); setPlaying(false); setPreviewError('Không tải được ảnh xem trước.')
+    setPreviewLoading(false); setPlaying(false); setPreviewError(t('msg_preview_image_fail'))
   }
   async function tryPreviewProxy() {
     if (!activeClip || activeIsImage || activePreviewOverride?.proxyPath || previewProxyBusy) return
@@ -941,11 +967,11 @@ export default function App() {
       if (!source || clips[source.entryIndex]?.id !== sourceId) { setPreviewLoading(false); return }
       pendingSeekRef.current = source.sourceTime
       setPreviewSources((items) => ({ ...items, [sourceId]: { sourcePath, proxyPath } }))
-      setStatus('Đang xem bản proxy nhẹ; bản xuất vẫn dùng media gốc.')
+      setStatus(t('msg_proxy_active'))
     } catch (error) {
       if (scope !== resourceScopeRef.current || revision !== editRevisionRef.current) return
       resumePlayRequestedRef.current = false
-      setPreviewLoading(false); setPreviewError(error?.message || 'Không tạo được proxy xem trước.')
+      setPreviewLoading(false); setPreviewError(error?.message || t('msg_proxy_fail'))
     } finally { setPreviewProxyBusy(false) }
   }
   function useOriginalPreview() {
@@ -990,23 +1016,6 @@ export default function App() {
       try { v.currentTime = preview.sourceTime } catch { pendingSeekRef.current = preview.sourceTime }
     }
   }
-  const seekGlobal = useCallback((gt) => {
-    gt = clamp(gt, 0, totalDuration || 0)
-    const source = resolvePreviewSource(timelinePlan, gt)
-    const idx = source ? clips.findIndex((c) => c.id === source.clipId) : -1
-    const srcTime = source?.sourceTime
-    if (idx < 0) { setCurrent(gt); return }
-    if (idx !== activeIdx) { pendingSeekRef.current = srcTime; setActiveIdx(idx) }
-    else if (videoRef.current) {
-      if (videoRef.current.readyState >= 1) { try { videoRef.current.currentTime = srcTime } catch { pendingSeekRef.current = srcTime } }
-      else pendingSeekRef.current = srcTime
-    }
-    curRef.current = gt; setCurrent(gt)
-    const a = musicRef.current
-    if (a && bgDur) { try { a.currentTime = bgLoop ? gt % bgDur : Math.min(gt, bgDur) } catch (e) {} }
-    const vv = voiceRef.current
-    if (vv) { try { vv.currentTime = clamp(gt - voiceOffset, 0, vv.duration || voiceDur || 0) } catch (e) {} }
-  }, [timelinePlan, totalDuration, clips, activeIdx, bgDur, bgLoop, voiceDur, voiceOffset])
   const togglePlay = useCallback(() => {
     const v = videoRef.current
     if (!v) { // clip dang active la ANH: khong co <video>, dieu khien bang state (vong RAF lo phat)
@@ -1186,6 +1195,10 @@ export default function App() {
     attachDocumentMouseDrag(move, up)
   }
 
+  // Tinh truoc cac hook ben duoi: mang phu thuoc cua phim tat doc projectDirty luc render (const khong duoc hoist)
+  const serializedProject = JSON.stringify(buildProject())
+  const projectDirty = savedProjectSerialized != null && savedProjectSerialized !== serializedProject
+
   // ---- Phim tat ----
   useEffect(() => {
     const onKey = (e) => {
@@ -1330,7 +1343,7 @@ export default function App() {
         ? captions.flatMap((caption) => mapSourceRange(timelinePlan, clips[0].id, caption.start, caption.end).map((range) => ({ ...caption, ...range })))
         : captions
       const savedPath = await window.taoclip.saveSrt(outputCaptions)
-      if (savedPath) setCapStatus(`Đã xuất SRT: ${savedPath}`)
+      if (savedPath) setCapStatus(t('msg_srt_saved', { p: savedPath }))
     } catch (e) { setCapStatus(t('st_err', { e })) }
   }
   async function importSrt() {
@@ -1338,7 +1351,7 @@ export default function App() {
     try {
       const result = await window.taoclip.openSrt()
       if (!result?.captions) return
-      if (resourceScopeRef.current !== scope) { notify('Dự án đã đổi; phụ đề vừa chọn chưa được nhập.', 'err'); return }
+      if (resourceScopeRef.current !== scope) { notify(t('msg_srt_project_changed'), 'err'); return }
       pushHistory(); setCaptions(result.captions.map((caption) => ({ ...caption, id: makeEntityId('caption') })))
       setCaptionTimebase('timeline'); setCapStatus(t('cap_count', { n: result.captions.length }))
     } catch (e) { setCapStatus(t('st_err', { e })) }
@@ -1397,18 +1410,18 @@ export default function App() {
   }
   function applySilenceAnalysis() {
     const sourceKey = clips[0] && JSON.stringify({ id: clips[0].id, path: clips[0].path, in: clips[0].in, out: clips[0].out, speed: clips[0].speed })
-    if (autoInfo?.sourceKey && autoInfo.sourceKey !== sourceKey) { setStatus('Nguồn, trim hoặc tốc độ clip đã đổi. Hãy phân tích im lặng lại trước khi áp dụng.'); return }
-    if (autoInfo?.options?.noise !== `${silenceParams.threshold}dB` || autoInfo?.options?.minSilence !== silenceParams.minSilence) { setStatus('Thông số phân tích đã đổi. Hãy phân tích lại trước khi áp dụng.'); return }
-    if (!autoInfo?.keep?.length) { setStatus('Phân tích không còn đoạn có tiếng để giữ; chưa áp dụng để tránh xuất timeline rỗng.'); return }
+    if (autoInfo?.sourceKey && autoInfo.sourceKey !== sourceKey) { setStatus(t('msg_silence_source_changed')); return }
+    if (autoInfo?.options?.noise !== `${silenceParams.threshold}dB` || autoInfo?.options?.minSilence !== silenceParams.minSilence) { setStatus(t('msg_silence_params_changed')); return }
+    if (!autoInfo?.keep?.length) { setStatus(t('msg_silence_nothing_kept')); return }
     const clip = clips[0]
     const appliedKeep = autoInfo.keep.map((range) => ({ start: Math.max(range.start, clip.in), end: Math.min(range.end, clip.out) })).filter((range) => range.end - range.start > 0.05)
-    if (!appliedKeep.length) { setStatus('Các đoạn có tiếng đều nằm ngoài vùng trim hiện tại. Hãy chỉnh trim hoặc phân tích lại.'); return }
+    if (!appliedKeep.length) { setStatus(t('msg_silence_outside_trim')); return }
     pushHistory(); setKeepSegments(appliedKeep); setAutoCut(true)
     setCaptions((items) => remapAnchoredCaptions(clips, items, transition, true, appliedKeep))
   }
   function previewSilenceAt(sourceTime) {
     const mapped = mapSourceRange(timelinePlan, clips[0]?.id, sourceTime, Math.min(autoInfo?.duration || sourceTime + 0.05, sourceTime + 0.05))
-    if (!mapped.length) { setStatus('Khoảng này nằm ngoài phần clip đang dựng nên không thể preview trên timeline.'); return }
+    if (!mapped.length) { setStatus(t('msg_silence_outside_clip')); return }
     setPlaying(false); seekGlobal(mapped[0].start)
   }
 
@@ -1430,31 +1443,31 @@ export default function App() {
   async function importMusic() {
     const scope = resourceScopeRef.current
     const p = await window.taoclip.openAudio()
-    if (scope !== resourceScopeRef.current) { if (p) notify('Dự án đã đổi; nhạc vừa chọn chưa được thêm.', 'err'); return }
+    if (scope !== resourceScopeRef.current) { if (p) notify(t('msg_music_project_changed'), 'err'); return }
     if (p) setMusicFile(p)
   }
   async function addAudioItems(track) {
     const scope = resourceScopeRef.current
     const paths = await window.taoclip.openAudioFiles?.()
     if (!paths?.length) return
-    if (resourceScopeRef.current !== scope) { notify('Dự án đã đổi; các audio vừa chọn chưa được thêm.', 'err'); return }
+    if (resourceScopeRef.current !== scope) { notify(t('msg_audio_project_changed'), 'err'); return }
     const additions = [], errors = []
     for (const filePath of paths) {
       try {
         const media = await window.taoclip.inspectMedia(filePath)
-        if (media.kind !== 'audio') throw new Error('Tệp không có track âm thanh hợp lệ.')
+        if (media.kind !== 'audio') throw new Error(t('msg_audio_invalid'))
         additions.push({ id: makeEntityId('audio'), path: filePath, name: filePath.split(/[\\/]/).pop(), track,
           start: current, in: 0, out: media.duration, sourceDuration: media.duration, gain: track === 'music' ? 0.4 : 1, fadeIn: 0, fadeOut: 0,
           loop: track === 'music', muted: false, missing: false })
       } catch (error) { errors.push(`${filePath.split(/[\\/]/).pop()}: ${error.message}`) }
     }
-    if (resourceScopeRef.current !== scope) { notify('Dự án đã đổi trong lúc kiểm tra audio; các tệp chưa được thêm.', 'err'); return }
+    if (resourceScopeRef.current !== scope) { notify(t('msg_audio_inspect_project_changed'), 'err'); return }
     if (additions.length) {
       pushHistory()
       addLibraryAssets(additions.map((item) => makeLibraryAsset(item.path, 'audio', { duration: item.sourceDuration })))
       setAudioItems((items) => [...items, ...additions])
     }
-    setStatus(`${additions.length} audio item đã thêm${errors.length ? ` · ${errors.length} lỗi` : ''}`)
+    setStatus(t('msg_audio_added', { n: additions.length }) + (errors.length ? ` · ${t('msg_errors_suffix', { n: errors.length })}` : ''))
     if (errors.length) notify(errors.slice(0, 3).join('\n'), 'err')
   }
   function updateAudioItem(id, patch) {
@@ -1473,9 +1486,9 @@ export default function App() {
     const off = window.taoclip.onTtsProgress((s) => {
       if (editRevisionRef.current !== expectedRevision) return
       if (s.phase === 'download') setTtsStatus(t('cap_downloading', { p: s.progress }))
-      else if (s.phase === 'chunk') setTtsStatus(`Đang tạo đoạn ${s.index}/${s.total}…`)
+      else if (s.phase === 'chunk') setTtsStatus(t('msg_tts_chunk', { i: s.index, n: s.total }))
       else if (s.phase === 'synthesize') setTtsStatus(t('tts_generating'))
-      else if (s.phase === 'cached') setTtsStatus('Đang dùng audio đã lưu…')
+      else if (s.phase === 'cached') setTtsStatus(t('msg_tts_cached'))
     })
     try {
       const r = await window.taoclip.generateTTS(expectedText, ttsOpts())
@@ -1513,7 +1526,7 @@ export default function App() {
       }
       if (!mapped.length) { setRedubStatus(t('redub_no_speech')); return }
       setRedubSegments(mapped.map((s, i) => ({ ...s, id: s.id || `redub-${i}`, audioPath: '', audioDuration: 0, rate: 1 })))
-      setRedubStatus(`${mapped.length} câu đã chuẩn bị. Duyệt nội dung rồi tạo từng câu.`)
+      setRedubStatus(t('msg_redub_prepared', { n: mapped.length }))
     } catch (e) { setRedubStatus(e.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e })) } finally { setRedubBusy(false) }
   }
   async function generateRedubSegment(index) {
@@ -1523,13 +1536,13 @@ export default function App() {
     const expectedScope = resourceScopeRef.current
     const expectedId = segment.id
     const expectedText = segment.text.trim()
-    setRedubBusy(true); setRedubStatus(`Đang tạo câu ${index + 1}/${redubSegments.length}…`)
+    setRedubBusy(true); setRedubStatus(t('msg_redub_generating', { i: index + 1, n: redubSegments.length }))
     try {
       const result = await window.taoclip.generateTTS(expectedText, ttsOpts())
       const latest = redubSegmentsRef.current.find((item) => item.id === expectedId)
       if (resourceScopeRef.current !== expectedScope || editRevisionRef.current !== expectedRevision || latest?.text?.trim() !== expectedText) throw new Error('AI_RESULT_STALE')
       setRedubSegments((items) => items.map((item) => item.id === expectedId ? { ...item, audioPath: result.path, audioDuration: result.duration || 0 } : item))
-      setRedubStatus(`Đã tạo câu ${index + 1}; các câu khác được giữ nguyên.`)
+      setRedubStatus(t('msg_redub_generated', { i: index + 1 }))
     } catch (e) { setRedubStatus(e.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e })) } finally { setRedubBusy(false) }
   }
   async function applyRedub() {
@@ -1633,34 +1646,34 @@ export default function App() {
     const scope = resourceScopeRef.current, revision = editRevisionRef.current
     const dur = Math.min(3, Math.max(1, aiPreviewDuration), c.out - c.in)
     const start = clamp(aiPreviewStart, c.in, Math.max(c.in, c.out - dur))
-    setAiBusy(true); setAiStatus('Đang dựng preview thay nền…')
+    setAiBusy(true); setAiStatus(t('msg_ai_bg_preview_start'))
     const off = window.taoclip.onAiProgress((s) => {
       if (scope !== resourceScopeRef.current || revision !== editRevisionRef.current) return
-      if (s.phase === 'download') setAiStatus(`Đang tải model thay nền: ${s.progress ?? 0}%`)
-      else if (s.phase === 'matte') setAiStatus('Đang phân tích người trong preview…')
-      else if (s.phase === 'process') setAiStatus(`Đang dựng preview: ${s.progress}%`)
-      else if (s.phase === 'composite') setAiStatus('Đang ghép nền preview…')
+      if (s.phase === 'download') setAiStatus(t('msg_ai_bg_model_download', { p: s.progress ?? 0 }))
+      else if (s.phase === 'matte') setAiStatus(t('msg_ai_bg_matte_preview'))
+      else if (s.phase === 'process') setAiStatus(t('msg_ai_bg_preview_progress', { p: s.progress }))
+      else if (s.phase === 'composite') setAiStatus(t('msg_ai_bg_composite_preview'))
     })
     try {
       const result = await window.taoclip.previewBg({ input: c.path, start, dur, bg, procWidth: aiProcWidth })
       if (scope !== resourceScopeRef.current || revision !== editRevisionRef.current || selIdRef.current !== c.id || !clipsRef.current.some((clip) => clip.id === c.id && clip.path === c.path)) throw new Error('AI_RESULT_STALE')
-      setAiPreviewPath(result.path); setAiStatus('Preview sẵn sàng; clip gốc chưa bị thay đổi.')
+      setAiPreviewPath(result.path); setAiStatus(t('msg_ai_bg_preview_ready'))
     } catch (error) { setAiStatus(error.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e: error.message || error })) }
     finally { off(); setAiBusy(false) }
   }
   async function ensureAiModel() {
     if (aiBusy || faceBusy) return
-    setAiBusy(true); setAiStatus('Đang kiểm tra model thay nền…')
+    setAiBusy(true); setAiStatus(t('msg_ai_model_checking'))
     const off = window.taoclip.onAiProgress((s) => {
-      if (s.phase === 'download') setAiStatus(`Đang tải model thay nền: ${s.progress ?? 0}%`)
-      else if (s.phase === 'install') setAiStatus('Đang cài model có sẵn trong ứng dụng…')
+      if (s.phase === 'download') setAiStatus(t('msg_ai_bg_model_download', { p: s.progress ?? 0 }))
+      else if (s.phase === 'install') setAiStatus(t('msg_ai_model_installing'))
     })
-    try { setAiModelStatus(await window.taoclip.ensureAiModel()); setAiStatus('Model thay nền đã sẵn sàng.') }
+    try { setAiModelStatus(await window.taoclip.ensureAiModel()); setAiStatus(t('msg_ai_model_ready')) }
     catch (error) { setAiStatus(t('st_err', { e: error.message || error })) }
     finally { off(); setAiBusy(false) }
   }
   async function cancelAiOperation() {
-    try { if (await window.taoclip.cancelAi()) setAiStatus('Đang hủy tác vụ AI…') }
+    try { if (await window.taoclip.cancelAi()) setAiStatus(t('msg_ai_cancelling')) }
     catch (error) { setAiStatus(t('st_err', { e: error.message || error })) }
   }
   async function applyReplaceBg(bg) {
@@ -1673,7 +1686,7 @@ export default function App() {
       if (editRevisionRef.current !== expectedRevision) return
       if (s.phase === 'download') setAiStatus(t('ai_downloading', { p: s.progress ?? 0 }))
       else if (s.phase === 'load') setAiStatus(t('ai_loading'))
-      else if (s.phase === 'matte') setAiStatus('Đang phân tích nền/người…')
+      else if (s.phase === 'matte') setAiStatus(t('msg_ai_matte'))
       else if (s.phase === 'process') setAiStatus(t('ai_processing', { p: s.progress }))
       else if (s.phase === 'composite') setAiStatus(t('ai_compositing'))
     })
@@ -1693,7 +1706,7 @@ export default function App() {
     const scope = resourceScopeRef.current, revision = editRevisionRef.current
     const dur = Math.min(3, Math.max(1, aiPreviewDuration), c.out - c.in)
     const start = clamp(aiPreviewStart, c.in, Math.max(c.in, c.out - dur))
-    setFaceBusy(true); setFaceStatus('Đang dựng preview đổi mặt…')
+    setFaceBusy(true); setFaceStatus(t('msg_face_preview_start'))
     const off = window.taoclip.onFaceProgress((s) => {
       if (scope !== resourceScopeRef.current || revision !== editRevisionRef.current) return
       if (s.phase === 'download') setFaceStatus(t('face_downloading', { f: (s.file || '').replace('.onnx', ''), p: s.progress ?? 0 }))
@@ -1847,8 +1860,6 @@ export default function App() {
     ]
     return [...legacyAudioItems, ...audioItems]
   }
-  const serializedProject = JSON.stringify(buildProject())
-  const projectDirty = savedProjectSerialized != null && savedProjectSerialized !== serializedProject
   useEffect(() => {
     if (savedProjectSerialized == null) setSavedProjectSerialized(serializedProject)
     if (pendingProjectCleanRef.current) {
@@ -1977,7 +1988,7 @@ export default function App() {
       const data = buildProject()
       const p = projectPath ? await window.taoclip.writeProject(projectPath, data) : await window.taoclip.saveProject(data)
       if (p) {
-        if (resourceScopeRef.current !== scope) { notify(`Đã lưu snapshot dự án tại ${p}; dự án đang mở không bị thay đổi.`, 'ok'); return }
+        if (resourceScopeRef.current !== scope) { notify(t('msg_snapshot_saved', { p }), 'ok'); return }
         setProjectPath(p)
         setSavedProjectSerialized(JSON.stringify(data))
         const latest = await window.taoclip.latestRecovery?.()
@@ -1992,7 +2003,7 @@ export default function App() {
       const data = buildProject()
       const p = await window.taoclip.saveProject(data, projectPath)
       if (!p) return
-      if (resourceScopeRef.current !== scope) { notify(`Đã lưu snapshot dự án tại ${p}; dự án đang mở không bị thay đổi.`, 'ok'); return }
+      if (resourceScopeRef.current !== scope) { notify(t('msg_snapshot_saved', { p }), 'ok'); return }
       setProjectPath(p)
       setSavedProjectSerialized(JSON.stringify(data))
       const latest = await window.taoclip.latestRecovery?.()
@@ -2062,7 +2073,7 @@ export default function App() {
       const path = await window.taoclip.relinkMedia(asset.kind)
       if (!path) return
       const metadata = await window.taoclip.inspectMedia(path)
-      if (metadata.kind !== asset.kind) throw new Error('Loại media được chọn không khớp với asset bị thiếu.')
+      if (metadata.kind !== asset.kind) throw new Error(t('msg_relink_kind_mismatch'))
       const latest = libraryAssetsRef.current.find((item) => item.id === asset.id)
       if (resourceScopeRef.current !== scope || !latest?.missing || latest.path !== sourcePath) return
       pushHistory()
@@ -2125,7 +2136,7 @@ export default function App() {
           audioItems: getProjectAudioItems(),
           origVolume, ducking, aiEdited,
           captionTimebase,
-          useGpu, transition: clips.length > 1 && transition !== 'none'
+          useGpu, quality, resolution, transition: clips.length > 1 && transition !== 'none'
             ? { type: transition === 'cross' ? 'crossfade' : 'fade', dur: transitionDuration } : undefined
         })
         if (res && res.cancelled) { setStatus(t('export_cancelled')); notify(t('export_cancelled')); return }
@@ -2147,31 +2158,16 @@ export default function App() {
 
   return (
     <div className={`cc ${dragOver ? 'dragging' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <header className="cc-top">
-        <div className="cc-logo">Tao<span>Clip</span></div>
-        <div className="cc-proj" title={projectPath || t('proj_untitled')}>{projectPath ? projectPath.split(/[\\/]/).pop() : t('proj_untitled')}{projectDirty ? ' •' : ''} <span className="free">Free</span></div>
-        <div className="cc-top-right">
-          <button className="cc-ghost ic-btn" onClick={openProject} disabled={collectingProject} title={t('proj_open')}><FolderOpen size={16} /></button>
-          <button className="cc-ghost ic-btn" onClick={saveProject} disabled={collectingProject} title={t('proj_save')}><Save size={16} /></button>
-          <button className="cc-ghost ic-btn" onClick={saveProjectAs} disabled={collectingProject} title={t('proj_save_as')}><Save size={15} /></button>
-          <button className="cc-ghost ic-btn" onClick={collectProject} disabled={collectingProject} title={t('project_collect')}>{collectingProject ? '…' : <FolderUp size={16} />}</button>
-          <button className="cc-ghost ic-btn" onClick={undo} disabled={!hist.length} title={t('undo')}><Undo2 size={16} /></button>
-          <button className="cc-ghost ic-btn" onClick={redo} disabled={!future.length} title={t('redo')}><Redo2 size={16} /></button>
-          <select className="cc-lang" value={lang} onChange={(e) => setLang(e.target.value)} title="Language">
-            {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-          </select>
-          <button className="cc-export" onClick={() => setShowExport(true)} disabled={!hasClips || exporting}>
-            {exporting ? t('exporting_pct', { p: progress }) : <><Upload size={15} /> {t('export')}</>}
-          </button>
-        </div>
-      </header>
+      <TopBar
+        projectPath={projectPath} projectDirty={projectDirty} collecting={collectingProject}
+        canUndo={hist.length > 0} canRedo={future.length > 0} canExport={hasClips} exporting={exporting} progress={progress}
+        onOpen={openProject} onSave={saveProject} onSaveAs={saveProjectAs} onCollect={collectProject}
+        onUndo={undo} onRedo={redo} onExport={() => setShowExport(true)} />
 
       {recover && !clips.length && (
-        <div className="cc-recover">
-          <span>↩ {t('recover_msg')} {recover.name ? `— ${recover.name}` : ''} ({new Date(recover.timestamp).toLocaleString()})</span>
-          <button className="cc-export" onClick={() => { applyProject(recover.project); window.taoclip.dismissRecovery?.(recover.project.projectId, recover.revision); setRecover(null) }}>{t('recover_yes')}</button>
-          <button className="cc-ghost" onClick={() => { window.taoclip.dismissRecovery?.(recover.project.projectId, recover.revision); setRecover(null) }}>{t('recover_no')}</button>
-        </div>
+        <RecoveryBanner recover={recover}
+          onRestore={() => { applyProject(recover.project); window.taoclip.dismissRecovery?.(recover.project.projectId, recover.revision); setRecover(null) }}
+          onDismiss={() => { window.taoclip.dismissRecovery?.(recover.project.projectId, recover.revision); setRecover(null) }} />
       )}
 
       <div className="cc-mid">
@@ -2272,12 +2268,12 @@ export default function App() {
                   onEditStart={beginHistoryEdit} onEditEnd={endHistoryEdit} onPositionChange={updateVideoOverlay} />)}
                 {safeZone && ratio !== 'original' && (<div className="safe"><div className="sz top" /><div className="sz bottom" /><div className="sz right" /><span className="sz-tip">{t('safezone_tip')}</span></div>)}
                 {activeCaption && <div className="cc-caption"><span>{activeCaption.text}</span></div>}
-                {overlayOutsideSafe && <div className="cc-safe-warning">Chữ/sticker đang nằm ngoài vùng an toàn</div>}
-                {activePreviewOverride?.proxyPath && <div className="cc-preview-badge">Proxy xem trước · bản xuất dùng file gốc</div>}
-                {previewLoading && !activeClip.missing && <div className="cc-preview-state">Đang tải xem trước…</div>}
+                {overlayOutsideSafe && <div className="cc-safe-warning">{t('preview_safe_warning')}</div>}
+                {activePreviewOverride?.proxyPath && <div className="cc-preview-badge">{t('preview_proxy_badge')}</div>}
+                {previewLoading && !activeClip.missing && <div className="cc-preview-state">{t('preview_loading')}</div>}
                 {previewError && <div className="cc-preview-state error"><span>{previewError}</span>
-                  {!activeIsImage && !activePreviewOverride?.proxyPath && <button className="cc-import" disabled={previewProxyBusy} onClick={tryPreviewProxy}>{previewProxyBusy ? 'Đang tạo proxy…' : 'Tạo proxy xem trước'}</button>}
-                  {activePreviewOverride?.proxyPath && <button className="cc-import" onClick={useOriginalPreview}>Thử lại file gốc</button>}
+                  {!activeIsImage && !activePreviewOverride?.proxyPath && <button className="cc-import" disabled={previewProxyBusy} onClick={tryPreviewProxy}>{previewProxyBusy ? t('preview_proxy_creating') : t('preview_proxy_create')}</button>}
+                  {activePreviewOverride?.proxyPath && <button className="cc-import" onClick={useOriginalPreview}>{t('preview_use_original')}</button>}
                 </div>}
                 {activeOverlays.map((o) => (
                   <div key={o.id} className={`cc-ov ${o.type} ${selOv === o.id ? 'sel' : ''} ${safeZone && (o.x < 0.03 || o.x > 0.86 || o.y < 0.12 || o.y > 0.82) ? 'unsafe' : ''}`}
@@ -2365,12 +2361,12 @@ export default function App() {
               {videoOverlays.map((item) => {
                 const itemDuration = (item.out - item.in) / item.speed
                 const outside = item.start + itemDuration > totalDuration + FRAME
-                return <div key={item.id} className={`cc-v2-clip ${outside ? 'outside' : ''}`} title={`${item.name || item.path} · ${fmt(item.start)}${outside ? ' · vượt thời lượng V1' : ''}`}
+                return <div key={item.id} className={`cc-v2-clip ${outside ? 'outside' : ''}`} title={`${item.name || item.path} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1')}` : ''}`}
                 style={{ left: item.start * pps, width: Math.max(24, ((item.out - item.in) / item.speed) * pps) }}
                 onMouseDown={(event) => startV2Move(item, event)} onClick={(event) => { event.stopPropagation(); seekGlobal(item.start) }}>
                 <span>{item.name || item.path.split(/[\\/]/).pop()}</span>
-                <button className="cc-v2-resize" onMouseDown={(event) => startV2Resize(item, event)} title="Kéo để đổi thời lượng" />
-                <button onClick={(event) => { event.stopPropagation(); pushHistory(); setVideoOverlays((items) => items.filter((candidate) => candidate.id !== item.id)) }} title="Xóa khỏi V2"><X size={11} /></button>
+                <button className="cc-v2-resize" onMouseDown={(event) => startV2Resize(item, event)} title={t('v2_resize_tip')} />
+                <button onClick={(event) => { event.stopPropagation(); pushHistory(); setVideoOverlays((items) => items.filter((candidate) => candidate.id !== item.id)) }} title={t('v2_remove_tip')}><X size={11} /></button>
               </div>})}
             </div>}
             {anyAudio && (
@@ -2415,9 +2411,9 @@ export default function App() {
                 <div className={`cc-audio-item-clip ${item.track} ${item.muted ? 'muted' : ''} ${outside ? 'outside' : ''}`}
                   style={{ left: item.start * pps, width: Math.max(28, itemDuration * pps) }}
                   onMouseDown={(event) => startAudioItemDrag(item, event)} onClick={(event) => { event.stopPropagation(); seekGlobal(item.start) }}
-                  title={`${item.name} · ${fmt(item.start)}${outside ? ' · ngoài thời lượng V1' : ''}`}>
+                  title={`${item.name} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1_short')}` : ''}`}>
                   <span>{item.name}</span>
-                  <button onClick={(event) => { event.stopPropagation(); removeAudioItem(item.id) }} title="Xóa audio item"><X size={11} /></button>
+                  <button onClick={(event) => { event.stopPropagation(); removeAudioItem(item.id) }} title={t('audio_item_remove_tip')}><X size={11} /></button>
                 </div>
               </div>
             })}
@@ -2442,20 +2438,13 @@ export default function App() {
 
       {dragOver && <div className="cc-drop"><div>{t('drop_overlay')}</div></div>}
 
-      <div className="cc-toasts">
-        {toasts.map((n) => (
-          <div key={n.id} className={`cc-toast ${n.type}`}>
-            <span>{n.msg}</span>
-            {n.action && <button className="act" onClick={() => { n.action.run(); closeToast(n.id) }}>{n.action.label}</button>}
-            <button className="cap-del" onClick={() => closeToast(n.id)}><X size={12} /></button>
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} onClose={closeToast} />
 
       {showExport && (
         <ExportDialog
           ratio={ratio} extraRatios={extraRatios} toggleExtra={toggleExtra}
           mode={mode} setMode={changeMode} gpuEnc={gpuEnc} useGpu={useGpu} setUseGpu={setUseGpu}
+          quality={quality} setQuality={setQuality} resolution={resolution} setResolution={setResolution}
           captionsCount={captions.length} burnCaptions={burnCaptions} setBurnCaptions={changeBurnCaptions}
           clipCount={clips.length} totalDuration={totalDuration}
           hasBurnStage={(burnCaptions && captions.length > 0) || overlays.length > 0}
@@ -2465,24 +2454,7 @@ export default function App() {
           onClose={() => setShowExport(false)} />
       )}
 
-      {showKeys && (
-        <div className="cc-modal" onClick={() => setShowKeys(false)}>
-          <div className="cc-modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="cc-modal-head"><b>{t('keys_title')}</b><button className="cap-del" onClick={() => setShowKeys(false)}><X size={15} /></button></div>
-            <div className="keys-grid">
-              <kbd>Space</kbd><span>{t('sc_play')}</span>
-              <kbd>← / →</kbd><span>{t('sc_frame')}</span>
-              <kbd>Home / End</kbd><span>{t('sc_home')}</span>
-              <kbd>I / O</kbd><span>{t('sc_io')}</span>
-              <kbd>S</kbd><span>{t('sc_split')}</span>
-              <kbd>Del</kbd><span>{t('sc_del')}</span>
-              <kbd>+ / −</kbd><span>{t('sc_zoom')}</span>
-              <kbd>Ctrl+Z / Y</kbd><span>{t('sc_undo')}</span>
-              <kbd>Ctrl+🖱</kbd><span>{t('sc_wheel')}</span>
-            </div>
-          </div>
-        </div>
-      )}
+      {showKeys && <ShortcutsModal onClose={() => setShowKeys(false)} />}
       {trimTooltip && <div className="cc-trim-tooltip" style={{ left: trimTooltip.x, top: trimTooltip.y }} role="status" aria-live="polite">
         <b>{trimTooltip.which === 'l' ? 'In' : 'Out'} {fmt(trimTooltip.source)}</b><span>{t('trim_preview')}: {fmt(trimTooltip.duration)}</span>
       </div>}

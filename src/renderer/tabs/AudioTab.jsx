@@ -52,7 +52,7 @@ export default function AudioTab({
           </div>
           {syncMode === 'fit'
             ? <><small className="cap-hint">{hasFitMusic && fitMusicDuration ? t('sync_fit_info', { d: fitMusicDuration.toFixed(1), n: imageCount, p: fitSlideDuration.toFixed(1) }) : t('sync_need_music')}</small>
-                {hasFitMusic && fitMusicDuration > 0 && <small className="cap-hint">Canvas: {timelineDuration.toFixed(1)}s · mục tiêu nhạc: {fitMusicDuration.toFixed(1)}s</small>}</>
+                {hasFitMusic && fitMusicDuration > 0 && <small className="cap-hint">{t('audio_canvas_target', { c: timelineDuration.toFixed(1), m: fitMusicDuration.toFixed(1) })}</small>}</>
             : <><label className="vlbl" style={{ marginTop: 6 }}>{t('slide_dur')}</label>
               <div className="seg wrap">{SLIDE_DURS.map((s) => <button key={s} onClick={() => setSlideDur(s)}>{s}s</button>)}</div></>}
         </Sec>
@@ -70,20 +70,20 @@ export default function AudioTab({
         )}
       </Sec>
 
-      <Sec id="audio-items" title="Các đoạn âm thanh trên timeline" acc={acc} setAcc={setAcc}>
+      <Sec id="audio-items" title={t('audio_items_title')} acc={acc} setAcc={setAcc}>
         <div className="cc-import-row">
-          <button className="cc-import" onClick={() => addAudioItems('music')} disabled={!hasClips}>+ Nhiều đoạn nhạc</button>
-          <button className="cc-import alt" onClick={() => addAudioItems('voice')} disabled={!hasClips}>+ Nhiều đoạn voice</button>
+          <button className="cc-import" onClick={() => addAudioItems('music')} disabled={!hasClips}>{t('audio_add_music_items')}</button>
+          <button className="cc-import alt" onClick={() => addAudioItems('voice')} disabled={!hasClips}>{t('audio_add_voice_items')}</button>
         </div>
         {audioItems.map((item) => <div className={`cc-audio-item ${item.track}`} key={item.id}>
           <div className="cc-audio-item-head"><strong title={item.path}>{item.name}</strong>
             <button className="cap-del" onClick={() => removeAudioItem(item.id)}><X size={13} /></button></div>
-          <label>Vị trí <input type="number" min="0" step="0.1" value={item.start}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { start: Math.max(0, Number(event.target.value) || 0) })} /> giây</label>
-          <label>Trim vào <input type="number" min="0" max={Math.max(0, item.out - 0.05)} step="0.1" value={item.in}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { in: Math.min(item.out - 0.05, Math.max(0, Number(event.target.value) || 0)) })} /> giây</label>
-          <label>Trim ra <input type="number" min={item.in + 0.05} max={item.sourceDuration || 600} step="0.1" value={item.out}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { out: Math.min(item.sourceDuration || 600, Math.max(item.in + 0.05, Number(event.target.value) || item.in + 0.05)) })} /> giây</label>
+          <label>{t('audio_pos')} <input type="number" min="0" step="0.1" value={item.start}
+            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { start: Math.max(0, Number(event.target.value) || 0) })} /> {t('unit_sec')}</label>
+          <label>{t('audio_trim_in')} <input type="number" min="0" max={Math.max(0, item.out - 0.05)} step="0.1" value={item.in}
+            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { in: Math.min(item.out - 0.05, Math.max(0, Number(event.target.value) || 0)) })} /> {t('unit_sec')}</label>
+          <label>{t('audio_trim_out')} <input type="number" min={item.in + 0.05} max={item.sourceDuration || 600} step="0.1" value={item.out}
+            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { out: Math.min(item.sourceDuration || 600, Math.max(item.in + 0.05, Number(event.target.value) || item.in + 0.05)) })} /> {t('unit_sec')}</label>
           <label>Gain <b>{Math.round(item.gain * 100)}%</b></label>
           <input type="range" min="0" max="2" step="0.05" value={item.gain} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit}
             onChange={(event) => updateAudioItem(item.id, { gain: Number(event.target.value) })} />
@@ -94,11 +94,11 @@ export default function AudioTab({
               onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { fadeOut: Math.max(0, Number(event.target.value) || 0) })} /></label>
           </div>
           <div className="cc-audio-item-fades">
-            <label><input type="checkbox" checked={item.loop} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { loop: event.target.checked }) }} /> Lặp</label>
-            <label><input type="checkbox" checked={item.muted} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { muted: event.target.checked }) }} /> Tắt tiếng</label>
+            <label><input type="checkbox" checked={item.loop} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { loop: event.target.checked }) }} /> {t('audio_loop')}</label>
+            <label><input type="checkbox" checked={item.muted} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { muted: event.target.checked }) }} /> {t('audio_item_mute')}</label>
           </div>
         </div>)}
-        {!audioItems.length && <small className="cap-hint">Thêm các đoạn nhạc hoặc voice độc lập, kéo chúng trên timeline để đặt vị trí.</small>}
+        {!audioItems.length && <small className="cap-hint">{t('audio_items_hint')}</small>}
       </Sec>
 
       <Sec id="tts" title={t('tts_label')} acc={acc} setAcc={setAcc}>
@@ -113,10 +113,10 @@ export default function AudioTab({
             <div className="key-row">
               <input type="password" className="cc-key" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} placeholder={t('tts_key_ph')} disabled={ttsBusy} />
               <button className="cc-mini" onClick={saveApiKey} disabled={!apiKeyInput.trim() || ttsBusy}>{hasKey ? t('tts_key_change') : t('tts_key_save')}</button>
-              {hasKey && <button className="cc-mini" onClick={removeApiKey} disabled={ttsBusy}>Xóa key</button>}
+              {hasKey && <button className="cc-mini" onClick={removeApiKey} disabled={ttsBusy}>{t('key_remove')}</button>}
             </div>
-            {hasKey && <small className="cap-hint">{apiKeyStatus.persistent ? 'Key được lưu mã hóa trên thiết bị.' : 'Key chỉ được giữ trong phiên hiện tại; cần nhập lại khi mở app.'}</small>}
-            {apiKeyStatus.needsReentry && <small className="cap-hint">Key cũ không được mã hóa nên đã bỏ qua. Hãy nhập lại để dùng Google TTS.</small>}
+            {hasKey && <small className="cap-hint">{apiKeyStatus.persistent ? t('key_persistent') : t('key_session')}</small>}
+            {apiKeyStatus.needsReentry && <small className="cap-hint">{t('key_reenter')}</small>}
             {hasKey && <>
               <label className="vlbl" style={{ marginTop: 6 }}>{t('tts_voice')}</label>
               <div className="key-row">
@@ -130,7 +130,7 @@ export default function AudioTab({
               <input type="range" min={0.25} max={2} step={0.05} value={ttsRate} disabled={selectedVoice?.capabilities?.speakingRate === false} onMouseDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => setTtsRate(Number(e.target.value))} />
               <label className="vlbl">{t('tts_pitch')} <b>{ttsPitch > 0 ? '+' : ''}{ttsPitch}</b></label>
               <input type="range" min={-20} max={20} step={1} value={ttsPitch} disabled={selectedVoice?.capabilities?.pitch === false} onMouseDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => setTtsPitch(Number(e.target.value))} />
-              {selectedVoice?.capabilities?.speakingRate === false && <small className="cap-hint">Google không hỗ trợ chỉnh tốc độ hoặc cao độ với dòng giọng này; giá trị sẽ bị bỏ qua.</small>}
+              {selectedVoice?.capabilities?.speakingRate === false && <small className="cap-hint">{t('tts_google_rate_unsupported')}</small>}
             </>}
             <small className="cap-hint">{t('tts_google_hint')}</small>
           </div>
@@ -141,8 +141,8 @@ export default function AudioTab({
           <button className="cc-mini" onClick={previewVoice} disabled={ttsBusy || (ttsEngine === 'google' && !ttsVoice)}>{t('tts_preview')}</button>
         </div>
         {ttsEngine !== 'google' && <div className="bg-box">
-          <div className="key-row"><small className="cap-hint">Model tiếng Việt: {localTtsModel?.cached ? 'đã có trên máy, dùng offline' : localTtsModel?.state === 'check-failed' ? 'chưa kiểm tra được' : 'chưa tải về; lần tạo đầu cần internet'} </small>
-            <button className="cc-mini" onClick={refreshLocalTtsModel} disabled={ttsBusy}>Kiểm tra</button></div>
+          <div className="key-row"><small className="cap-hint">{t('tts_local_model')}: {localTtsModel?.cached ? t('tts_model_cached') : localTtsModel?.state === 'check-failed' ? t('tts_model_check_failed') : t('tts_model_missing')} </small>
+            <button className="cc-mini" onClick={refreshLocalTtsModel} disabled={ttsBusy}>{t('check')}</button></div>
           <small className="cap-hint">{t('tts_hint')}</small>
         </div>}
         {voice && (
@@ -158,30 +158,30 @@ export default function AudioTab({
         <small className="cap-hint">{t('redub_hint')}</small>
         <button className="cc-auto" onClick={redubVideo}
           disabled={!hasClips || !anyAudio || redubBusy || ttsBusy || (ttsEngine === 'google' && !ttsVoice)}>
-          {redubBusy ? (redubStatus || '...') : redubSegments.length ? 'Tạo lại transcript' : '1. Nhận dạng và chuẩn bị câu'}
+          {redubBusy ? (redubStatus || '...') : redubSegments.length ? t('redub_regen') : t('redub_prepare')}
         </button>
         {!!redubSegments.length && <>
-          <small className="cap-hint">Sửa nội dung hoặc thời gian trước khi tạo. Câu dài hơn slot được đánh dấu; hãy sửa nội dung hoặc thời gian nếu không muốn tăng tốc khi ghép.</small>
+          <small className="cap-hint">{t('redub_review_hint')}</small>
           {redubSegments.map((segment, index) => {
             const slot = Math.max(0.3, (redubSegments[index + 1]?.start ?? timelineDuration) - segment.start)
             const over = segment.audioDuration > slot + 0.05
             return <div className="bg-box" key={segment.id}>
-              <div className="key-row"><strong>Câu {index + 1}</strong><small>{Number(segment.start).toFixed(2)}–{Number(segment.end).toFixed(2)}s · slot {slot.toFixed(2)}s</small></div>
+              <div className="key-row"><strong>{t('redub_sentence', { n: index + 1 })}</strong><small>{Number(segment.start).toFixed(2)}–{Number(segment.end).toFixed(2)}s · slot {slot.toFixed(2)}s</small></div>
               <div className="key-row">
-                <label>Vào <input type="number" min="0" step="0.05" value={segment.start} disabled={redubBusy} onChange={(event) => { const start = Math.max(0, Number(event.target.value) || 0); setRedubSegments((items) => items.map((item, i) => i === index ? { ...item, start } : item)) }} /></label>
-                <label>Ra <input type="number" min="0.05" step="0.05" value={segment.end} disabled={redubBusy} onChange={(event) => { const end = Math.max(segment.start + 0.05, Number(event.target.value) || segment.start + 0.05); setRedubSegments((items) => items.map((item, i) => i === index ? { ...item, end } : item)) }} /></label>
+                <label>{t('t_in_short')} <input type="number" min="0" step="0.05" value={segment.start} disabled={redubBusy} onChange={(event) => { const start = Math.max(0, Number(event.target.value) || 0); setRedubSegments((items) => items.map((item, i) => i === index ? { ...item, start } : item)) }} /></label>
+                <label>{t('t_out_short')} <input type="number" min="0.05" step="0.05" value={segment.end} disabled={redubBusy} onChange={(event) => { const end = Math.max(segment.start + 0.05, Number(event.target.value) || segment.start + 0.05); setRedubSegments((items) => items.map((item, i) => i === index ? { ...item, end } : item)) }} /></label>
               </div>
               <textarea className="cc-tts" rows={2} value={segment.text} disabled={redubBusy}
                 onChange={(event) => { const text = event.target.value; setRedubSegments((items) => items.map((item, i) => i === index ? { ...item, text, audioPath: '', audioDuration: 0 } : item)) }} />
-              {segment.audioDuration > 0 && <small className="cap-hint">Voice {segment.audioDuration.toFixed(2)}s{over ? ` · dài hơn slot (${slot.toFixed(2)}s), sẽ bị co khoảng ${Math.min(4, segment.audioDuration / slot).toFixed(2)}× khi ghép` : ''}</small>}
+              {segment.audioDuration > 0 && <small className="cap-hint">{t('redub_voice_len', { s: segment.audioDuration.toFixed(2) })}{over ? ` · ${t('redub_over_slot', { slot: slot.toFixed(2), x: Math.min(4, segment.audioDuration / slot).toFixed(2) })}` : ''}</small>}
               <div className="key-row">
-                <button className="cc-mini" disabled={redubBusy || !segment.text.trim()} onClick={() => generateRedubSegment(index)}>{segment.audioPath ? 'Tạo lại câu' : 'Tạo câu'}</button>
-                <button className="cc-mini" disabled={!segment.audioPath} onClick={() => previewRedubSegment(segment.audioPath)}>Nghe câu</button>
+                <button className="cc-mini" disabled={redubBusy || !segment.text.trim()} onClick={() => generateRedubSegment(index)}>{segment.audioPath ? t('redub_regen_sentence') : t('redub_make_sentence')}</button>
+                <button className="cc-mini" disabled={!segment.audioPath} onClick={() => previewRedubSegment(segment.audioPath)}>{t('redub_listen')}</button>
               </div>
             </div>
           })}
-          <label className="chk"><input type="checkbox" checked={redubKeepOriginal} onChange={(event) => setRedubKeepOriginal(event.target.checked)} /> Giữ tiếng gốc khi áp dụng</label>
-          <button className="cc-auto" disabled={redubBusy || redubSegments.some((segment) => !segment.audioPath)} onClick={applyRedub}>Áp dụng lồng tiếng đã duyệt</button>
+          <label className="chk"><input type="checkbox" checked={redubKeepOriginal} onChange={(event) => setRedubKeepOriginal(event.target.checked)} /> {t('redub_keep_original')}</label>
+          <button className="cc-auto" disabled={redubBusy || redubSegments.some((segment) => !segment.audioPath)} onClick={applyRedub}>{t('redub_apply')}</button>
         </>}
         {!anyAudio && hasClips && <small className="cap-hint">{t('cap_no_audio')}</small>}
         {!redubBusy && redubStatus && <small className="cap-hint">{redubStatus}</small>}

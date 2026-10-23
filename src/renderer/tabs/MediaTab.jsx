@@ -69,13 +69,13 @@ export default function MediaTab({ clips, selId, setSelId, layout, seekGlobal, o
         </button>
       </div>
       <div className="key-row" style={{ marginBottom: 6 }}>
-        <select className="cc-key" value={maxRes} onChange={(e) => setMaxRes(Number(e.target.value))} disabled={dlBusy} aria-label="Độ phân giải tối đa">
-          {[240, 360, 480, 720, 1080, 1440, 2160].map((height) => <option key={height} value={height}>Tối đa {height}p</option>)}
+        <select className="cc-key" value={maxRes} onChange={(e) => setMaxRes(Number(e.target.value))} disabled={dlBusy} aria-label={t('dl_max_res')}>
+          {[240, 360, 480, 720, 1080, 1440, 2160].map((height) => <option key={height} value={height}>{t('dl_max_height', { h: height })}</option>)}
         </select>
-        <button className="cc-mini" onClick={async () => { const dir = await chooseDownloadDirectory?.(); if (dir) setOutDir(dir) }} disabled={dlBusy} title="Chọn thư mục lưu"><FolderOpen size={14} /></button>
+        <button className="cc-mini" onClick={async () => { const dir = await chooseDownloadDirectory?.(); if (dir) setOutDir(dir) }} disabled={dlBusy} title={t('dl_choose_dir')}><FolderOpen size={14} /></button>
       </div>
-      {outDir && <small className="cap-hint">Lưu vào: {outDir}</small>}
-      {dlBusy && <button className="cc-ghost" onClick={cancelDownload}>Hủy tải</button>}
+      {outDir && <small className="cap-hint">{t('dl_save_to', { d: outDir })}</small>}
+      {dlBusy && <button className="cc-ghost" onClick={cancelDownload}>{t('dl_cancel')}</button>}
       {dlStatus && <small className="cap-hint">{dlStatus}</small>}
       <small className="cap-hint" style={{ marginBottom: 10 }}>{t('dl_hint')}</small>
       <div className="cc-grid">
@@ -104,7 +104,7 @@ export default function MediaTab({ clips, selId, setSelId, layout, seekGlobal, o
             <div className="key-row">
               <button className="cc-mini" onClick={(event) => { event.stopPropagation(); onAddAssetToTimeline(asset) }} disabled={missing}>{t('media_add_to_timeline')}</button>
               {missing && <button className="cc-mini" onClick={(event) => { event.stopPropagation(); onRelinkLibraryAsset(asset) }}>{t('media_relink')}</button>}
-              {selected && <button className="cc-v2-add" onClick={(event) => { event.stopPropagation(); onAddToOverlay?.(selected) }} title="Đưa media lên track phủ V2">+ V2</button>}
+              {selected && <button className="cc-v2-add" onClick={(event) => { event.stopPropagation(); onAddToOverlay?.(selected) }} title={t('v2_add_tip')}>+ V2</button>}
               <button className="cap-del" onClick={(event) => { event.stopPropagation(); onRemoveLibraryAsset(asset) }} title={t('media_remove_library')} aria-label={t('media_remove_library')}><X size={13} /></button>
             </div>
             {!preview && previewError && <button className="cc-thumb-retry" onClick={(event) => { event.stopPropagation(); void loadAssetPreview(asset) }}>{t('media_retry')}</button>}
@@ -113,18 +113,18 @@ export default function MediaTab({ clips, selId, setSelId, layout, seekGlobal, o
         {!assets.length && <div className="cc-hint">{libraryAssets.length ? t('media_no_match') : <>{t('drop_hint')}<br />{t('drop_hint2')}</>}</div>}
       </div>
       {videoOverlays.length > 0 && <section className="cc-v2-controls">
-        <h4>Track phủ V2</h4>
+        <h4>{t('v2_track')}</h4>
         {videoOverlays.map((item) => <div key={item.id} className="cc-v2-control-item">
           <strong title={item.name || item.path}>{item.name || item.path.split(/[\\/]/).pop()}</strong>
-          <label>Kích thước ngang <output>{Math.round(item.width * 100)}%</output>
+          <label>{t('v2_width')} <output>{Math.round(item.width * 100)}%</output>
             <input type="range" min="0.1" max="2" step="0.05" value={item.width}
               onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { width: Number(event.target.value) })} />
           </label>
-          <label>Kích thước dọc <output>{Math.round(item.height * 100)}%</output>
+          <label>{t('v2_height')} <output>{Math.round(item.height * 100)}%</output>
             <input type="range" min="0.1" max="2" step="0.05" value={item.height}
               onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { height: Number(event.target.value) })} />
           </label>
-          <label>Độ mờ <output>{Math.round(item.opacity * 100)}%</output>
+          <label>{t('v2_opacity')} <output>{Math.round(item.opacity * 100)}%</output>
             <input type="range" min="0" max="1" step="0.05" value={item.opacity}
               onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { opacity: Number(event.target.value) })} />
           </label>

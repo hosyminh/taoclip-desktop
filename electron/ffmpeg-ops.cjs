@@ -51,13 +51,13 @@ function configure(ffmpegPath, ffprobePath) {
 // ---------- Job context: cancellation and encoder are isolated per export ----------
 const JOB_SCOPE = new AsyncLocalStorage()
 const JOBS = new Map()
-const DEFAULT_JOB = { id: 'default', cancelled: false, kills: new Set(), encoder: 'cpu' }
+const DEFAULT_JOB = { id: 'default', cancelled: false, kills: new Set(), encoder: 'cpu', quality: 'standard', shortSide: 1080 }
 function currentJob() { return JOB_SCOPE.getStore() || DEFAULT_JOB }
 function beginJob(id) {
-  if (!id) { DEFAULT_JOB.cancelled = false; DEFAULT_JOB.encoder = 'cpu'; return DEFAULT_JOB }
+  if (!id) { DEFAULT_JOB.cancelled = false; DEFAULT_JOB.encoder = 'cpu'; DEFAULT_JOB.quality = 'standard'; DEFAULT_JOB.shortSide = 1080; return DEFAULT_JOB }
   const existing = JOBS.get(id)
   if (existing) return existing
-  const job = { id, cancelled: false, kills: new Set(), encoder: 'cpu' }
+  const job = { id, cancelled: false, kills: new Set(), encoder: 'cpu', quality: 'standard', shortSide: 1080 }
   JOBS.set(id, job)
   return job
 }
@@ -99,8 +99,32 @@ const VENC_ARGS = {
   qsv: ['-c:v', 'h264_qsv', '-global_quality', '23', '-pix_fmt', 'yuv420p'],
   amf: ['-c:v', 'h264_amf', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23', '-quality', 'balanced', '-pix_fmt', 'yuv420p']
 }
+// Muc chat luong xuat: crf cho libx264, q cho NVENC/QSV/AMF (so nho = chat luong cao hon, file lon hon)
+const QUALITY_LEVELS = { high: { crf: 16, q: 19 }, standard: { crf: 20, q: 23 }, small: { crf: 24, q: 27 } }
+const QUALITY_FLAGS = { cpu: ['-crf'], nvenc: ['-cq'], qsv: ['-global_quality'], amf: ['-qp_i', '-qp_p'] }
+const SHORT_SIDES = [720, 1080, 1440]
+function withQuality(name, quality) {
+  const args = VENC_ARGS[name].slice()
+  const level = QUALITY_LEVELS[quality]
+  if (!level) return args
+  for (const flag of QUALITY_FLAGS[name]) {
+    const index = args.indexOf(flag)
+    if (index >= 0) args[index + 1] = String(name === 'cpu' ? level.crf : level.q)
+  }
+  return args
+}
 function setEncoder(name) { currentJob().encoder = VENC_ARGS[name] ? name : 'cpu' }
-function vencArgs() { return VENC_ARGS[currentJob().encoder] || VENC_ARGS.cpu }
+// Gia tri la lai se ve mac dinh (standard / canh ngan 1080) thay vi bao loi, vi day chi la tuy chon xuat
+function setOutputProfile({ quality, resolution } = {}) {
+  const job = currentJob()
+  job.quality = QUALITY_LEVELS[quality] ? quality : 'standard'
+  const side = Number(resolution)
+  job.shortSide = SHORT_SIDES.includes(side) ? side : 1080
+}
+function vencArgs() {
+  const job = currentJob()
+  return withQuality(VENC_ARGS[job.encoder] ? job.encoder : 'cpu', job.quality)
+}
 function getEncoder() { return currentJob().encoder }
 
 // Thu encoder co chay duoc tren may nay khong (encode 1 khung test)
@@ -148,13 +172,15 @@ async function createPreviewProxy(input, output, onProgress) {
 }
 
 // ---------- Ti le khung -> kich thuoc ----------
-function ratioDims(ratio) {
+// short = canh ngan cua khung (720/1080/1440); 1080 cho ra 1080x1920, 1080x1350, 1920x1080 nhu truoc
+function ratioDims(ratio, short = 1080) {
+  const even = (value) => Math.round(value / 2) * 2
   switch (ratio) {
-    case '9:16': return [1080, 1920]
-    case '1:1': return [1080, 1080]
-    case '16:9': return [1920, 1080]
-    case '4:5': return [1080, 1350]
-    default: return null // 'original'
+    case '9:16': return [short, even(short * 16 / 9)]
+    case '1:1': return [short, short]
+    case '16:9': return [even(short * 16 / 9), short]
+    case '4:5': return [short, even(short * 5 / 4)]
+    default: return null // 'original': giu kich thuoc nguon
   }
 }
 
@@ -724,7 +750,7 @@ async function exportClips({ clips, output, ratio, colorFilter, transition, edit
   const xfade = transition && transition.type === 'crossfade'
   const fadeDur = (transition && transition.dur) || 0.4
   const infos = await Promise.all(clips.map((c) => probe(c.input)))
-  let dims = ratioDims(ratio)
+  let dims = ratioDims(ratio, currentJob().shortSide)
   if (!dims) { const original = displayDims(infos[0]); dims = [original[0] || 1080, original[1] || 1920] }
   dims = [dims[0] - (dims[0] % 2), dims[1] - (dims[1] % 2)]
   const anyAudio = infos.some((i) => i.hasAudio)
@@ -1079,7 +1105,7 @@ async function exportVideo(opts) {
   const info = await probe(input)
   const dur = info.duration
   const ratio = opts.ratio || (opts.vertical ? '9:16' : 'original')
-  const dims = ratioDims(ratio)
+  const dims = ratioDims(ratio, currentJob().shortSide)
   const colorFilter = opts.colorFilter || null
   const report = (p) => onProgress && onProgress(Math.max(0, Math.min(100, Math.round(p))))
 
@@ -1146,6 +1172,6 @@ module.exports = {
   configure, probe, inspectMedia, decodeOutput, getKeyframes, buildAtempoChain, exportVideo, vencArgs, buildColorFilter, renderFilterPreview, writeAiEditMetadata, prioritizeCache,
   generateThumbnails, generateWaveform, detectSilence, computeKeep, ratioDims,
   extractAudioWav, burnSubtitles, mixAudio, mixAudioTracks, exportClips, compositeVideoOverlays, encodeImageTS, crossfadeChain,
-  setEncoder, getEncoder, detectBestEncoder, createPreviewProxy, previewProxyFingerprint, buildTimelineAudioWav, buildVoiceSourceWav, concatAudioFiles, buildRedubTrack,
+  setEncoder, setOutputProfile, getEncoder, detectBestEncoder, createPreviewProxy, previewProxyFingerprint, buildTimelineAudioWav, buildVoiceSourceWav, concatAudioFiles, buildRedubTrack,
   beginJob, runJob, endJob, cancelJob, isCancelled
 }

@@ -121,6 +121,26 @@ async function run() {
     const oi = await ops.probe(o)
     check(`ratio ${r}`, oi.width === w && oi.height === h, `(${oi.width}x${oi.height})`)
   }
+  check('ratioDims keeps the 1080 defaults and scales to 720/1440 with even sizes',
+    JSON.stringify([ops.ratioDims('9:16'), ops.ratioDims('9:16', 720), ops.ratioDims('16:9', 720), ops.ratioDims('4:5', 1440), ops.ratioDims('original', 720)]) ===
+    JSON.stringify([[1080, 1920], [720, 1280], [1280, 720], [1440, 1800], null]))
+  const profileSizes = {}
+  for (const [quality, resolution] of [['high', '720'], ['small', '720'], ['bogus', '999']]) {
+    const job = ops.beginJob(`profile-${quality}`)
+    await ops.runJob(job, async () => {
+      ops.setOutputProfile({ quality, resolution })
+      const args = ops.vencArgs()
+      if (quality === 'high') check('high quality maps to a lower libx264 CRF', args[args.indexOf('-crf') + 1] === '16')
+      if (quality === 'small') check('compact quality maps to a higher libx264 CRF', args[args.indexOf('-crf') + 1] === '24')
+      if (quality === 'bogus') check('unknown quality/resolution fall back to standard 1080', args[args.indexOf('-crf') + 1] === '20' && JSON.stringify(ops.ratioDims('1:1', job.shortSide)) === '[1080,1080]')
+      const o = p(`profile-${quality}.mp4`)
+      await ops.exportVideo({ input: SRC, output: o, start: 0, end: 3, ratio: '9:16', onProgress: () => {} })
+      profileSizes[quality] = { bytes: fs.statSync(o).size, info: await ops.probe(o) }
+    })
+    ops.endJob(`profile-${quality}`)
+  }
+  check('720p export honors the selected resolution', profileSizes.high.info.width === 720 && profileSizes.high.info.height === 1280, `(${profileSizes.high.info.width}x${profileSizes.high.info.height})`)
+  check('high quality output is larger than compact output at the same resolution', profileSizes.high.bytes > profileSizes.small.bytes, `(${profileSizes.high.bytes} vs ${profileSizes.small.bytes} bytes)`)
   gen('crop-panels.mp4', ['-f', 'lavfi', '-i', 'color=c=red:s=320x480:r=30:d=2', '-f', 'lavfi', '-i', 'color=c=blue:s=320x480:r=30:d=2', '-filter_complex', '[0:v][1:v]hstack=inputs=2[v]', '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p'])
   for (const [position, name] of [[0, 'left'], [1, 'right']]) {
     const out = p(`crop-${name}.mp4`)

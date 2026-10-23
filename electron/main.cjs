@@ -704,6 +704,7 @@ async function runExport(event, opts) {
   const report = (pct) => event.sender.send('video:export:progress', { jobId: opts.jobId, progress: pct })
   const stage = (name) => event.sender.send('video:export:stage', { jobId: opts.jobId, stage: name })
   ops.setEncoder(opts.useGpu !== false ? gpuEncoder : 'cpu')
+  ops.setOutputProfile({ quality: opts.quality, resolution: opts.resolution })
   const capBurn = opts.captions && opts.captions.length && opts.burnCaptions
   const hasOverlays = opts.overlays && opts.overlays.length
   const hasVideoOverlays = opts.videoOverlays && opts.videoOverlays.length
