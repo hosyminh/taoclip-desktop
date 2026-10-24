@@ -234,6 +234,20 @@ class App {
     await this.send('Input.dispatchDragEvent', { type: 'drop', x, y, data })
   }
 
+  /** Bang thuoc tinh chia tab: bat tab chua o data-prop = name (giu nguyen neu o do dang hien). Tra ve true neu tim thay. */
+  async reveal(name) {
+    const selector = `.cc-insp [data-prop="${name}"]`
+    if (await this.count(selector)) return true
+    const tabs = await this.count('.cc-insp [data-tab]')
+    for (let i = 0; i < tabs; i++) {
+      await this.click('.cc-insp [data-tab]', i)
+      await sleep(80)
+      if (await this.count(selector)) return true
+    }
+    return false
+  }
+  hasProp(name) { return this.reveal(name) }
+
   /** Cac thao tac doc nhanh trang thai app. */
   text(selector) { return this.eval(`document.querySelector(${JSON.stringify(selector)})?.innerText ?? null`) }
   count(selector) { return this.eval(`document.querySelectorAll(${JSON.stringify(selector)}).length`) }
