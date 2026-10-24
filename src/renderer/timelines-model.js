@@ -4,7 +4,7 @@
 // Moi truong thuoc ve rieng tung timeline; phan con lai (assets, projectId...) la cua ca du an.
 export const TIMELINE_KEYS = Object.freeze([
   'ratio', 'filterKey', 'filterIntensity', 'mode', 'captions', 'burnCaptions', 'overlays', 'videoOverlays', 'audioItems', 'tracks',
-  'transition', 'transitionStyle', 'transitionDuration', 'clips', 'ducking', 'origVolume', 'syncMode', 'slideDur',
+  'transition', 'transitionStyle', 'transitionDuration', 'watermark', 'clips', 'ducking', 'origVolume', 'syncMode', 'slideDur',
   'ttsEngine', 'ttsVoice', 'ttsRate', 'ttsPitch', 'aiEdited', 'keepSegments', 'autoCut', 'autoInfo', 'silenceParams', 'captionTimebase', 'markers'
 ])
 

@@ -288,6 +288,14 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .crop-anchors button { height: 30px; padding: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 14px; line-height: 1; }
 .crop-anchors button:hover { border-color: var(--accent); color: var(--text); }
 .crop-anchors button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+/* Tab Logo: thu vien logo */
+.logo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.logo-card { position: relative; aspect-ratio: 1; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.logo-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.logo-pick { width: 100%; height: 100%; padding: 8px; background: transparent; border: 0; }
+.logo-pick img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.logo-del { position: absolute; top: 3px; right: 3px; display: inline-flex; padding: 2px; background: rgba(0,0,0,.55); border: 0; border-radius: 4px; color: #fff; }
+.logo-del:hover { background: var(--brand); }
 
 /* ---------- TIMELINE ---------- */
 .cc-tl { height: 280px; background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; }

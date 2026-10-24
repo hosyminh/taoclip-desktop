@@ -14,6 +14,8 @@ import TextTab from './tabs/TextTab.jsx'
 import AudioTab from './tabs/AudioTab.jsx'
 import FilterTab from './tabs/FilterTab.jsx'
 import StickerTab from './tabs/StickerTab.jsx'
+import LogoTab from './tabs/LogoTab.jsx'
+import WatermarkPreview from './WatermarkPreview.jsx'
 import TransTab from './tabs/TransTab.jsx'
 import Timeline from './timeline/Timeline.jsx'
 import ContextMenu from './timeline/ContextMenu.jsx'
@@ -34,7 +36,7 @@ import ShortcutsModal from './ShortcutsModal.jsx'
 import RecoveryBanner from './RecoveryBanner.jsx'
 import VideoOverlayPreview from './VideoOverlayPreview.jsx'
 import AudioItemPreview from './AudioItemPreview.jsx'
-import { normalizeProject } from './project-model.js'
+import { normalizeProject, DEFAULT_WATERMARK } from './project-model.js'
 import {
   MAX_TIMELINES, nextTimelineName, copyTimelineName, cleanTimelineName, activeAfterRemove, moveTimeline, libraryAfterRestore, approxTimelineDuration
 } from './timelines-model.js'
@@ -218,6 +220,7 @@ export default function App() {
   const [transition, setTransition] = useState('none') // none | fade | cross
   const [transitionDuration, setTransitionDuration] = useState(0.5)
   const [transitionStyle, setTransitionStyle] = useState(DEFAULT_TRANSITION_STYLE) // kieu xfade khi transition = cross
+  const [watermark, setWatermark] = useState(null) // logo watermark cua timeline (null = khong co)
   const [dragInsert, setDragInsert] = useState(null)
   // xuat
   const [exporting, setExporting] = useState(false)
@@ -519,7 +522,7 @@ export default function App() {
     return {
       selectedClipId: selId, selectedOverlayId: selOv, activeClipId: clips[activeIdx]?.id || null, activeClipIndex: activeIdx,
       clips: snapshotHistoryClips(clips), libraryAssets, overlays, videoOverlays, audioItems, tracks, captions, captionTimebase,
-      ratio, filterKey, filterIntensity, mode, transition, transitionStyle, transitionDuration, burnCaptions,
+      ratio, filterKey, filterIntensity, mode, transition, transitionStyle, transitionDuration, burnCaptions, watermark,
       origVolume, ducking, syncMode, slideDur,
       ttsEngine, ttsVoice, ttsRate, ttsPitch, keepSegments, autoCut, autoInfo, aiEdited, silenceParams, markers
     }
@@ -569,7 +572,7 @@ export default function App() {
     setOverlays(s.overlays || []); setVideoOverlays(s.videoOverlays || []); setAudioItems(s.audioItems || []); setTracks(normalizeTracks(s.tracks)); setSelItem((prev) => (prev && ((prev.kind === 'v2' ? s.videoOverlays : s.audioItems) || []).some((item) => item.id === prev.id) ? prev : null)) // giu muc dang chon neu con ton tai (Hoan tac khong mat bang thuoc tinh)
      setCaptions(s.captions || []); setCaptionTimebase(s.captionTimebase || 'timeline')
     setRatio(s.ratio || '9:16'); setFilterKey(s.filterKey || 'none'); setFilterIntensity(s.filterIntensity ?? 100); setMode(s.mode || 'smart')
-    setTransition(s.transition || 'none'); setTransitionStyle(s.transitionStyle || DEFAULT_TRANSITION_STYLE); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
+    setTransition(s.transition || 'none'); setTransitionStyle(s.transitionStyle || DEFAULT_TRANSITION_STYLE); setWatermark(s.watermark ?? null); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
     setOrigVolume(s.origVolume ?? 1)
     setDucking(s.ducking !== false); setSyncMode(s.syncMode || 'fit'); setSlideDur(s.slideDur ?? 3)
     setTtsEngine(s.ttsEngine || 'local'); setTtsVoice(s.ttsVoice || ''); setTtsRate(s.ttsRate ?? 1); setTtsPitch(s.ttsPitch ?? 0)
@@ -622,6 +625,13 @@ export default function App() {
     setTransitionDuration(duration); setCaptions((items) => remapAnchoredCaptions(clips, items, transition, autoCut, keepSegments, duration))
   }
   function changeTransitionStyle(value) { if (value !== transitionStyle) { pushHistory(); setTransitionStyle(value) } }
+  // Watermark: cap nhat mot phan; nguoi goi chiu trach nhiem pushHistory (roi rac) hoac beginEdit/endEdit (keo thanh truot)
+  function patchWatermark(patch) { setWatermark((w) => ({ ...(w || DEFAULT_WATERMARK), ...patch })) }
+  // Thong tin watermark gui sang main khi xuat (tat hoac chua co logo thi bo qua)
+  function watermarkForExport(wm) {
+    if (!wm || !wm.enabled || !wm.path) return undefined
+    return { path: wm.path, name: wm.name, anchorX: wm.anchorX, anchorY: wm.anchorY, size: wm.size, margin: wm.margin, opacity: wm.opacity, fadeIn: wm.fadeIn, fadeOut: wm.fadeOut }
+  }
   function changeMode(value) { if (value !== mode) { pushHistory(); setMode(value) } }
   function changeBurnCaptions(value) { if (value !== burnCaptions) { pushHistory(); setBurnCaptions(value) } }
   function changeSyncMode(value) { if (value !== syncMode) { pushHistory(); setSyncMode(value) } }
@@ -2697,7 +2707,7 @@ export default function App() {
     return {
       captionTimebase: src.captionTimebase, ratio: src.ratio, filterKey: src.filterKey, filterIntensity: src.filterIntensity, mode: src.mode,
       captions: src.captions, burnCaptions: src.burnCaptions, overlays: src.overlays, videoOverlays: src.videoOverlays,
-      audioItems: src.audioItems, tracks: src.tracks, transition: src.transition, transitionStyle: src.transitionStyle, transitionDuration: src.transitionDuration,
+      audioItems: src.audioItems, tracks: src.tracks, transition: src.transition, transitionStyle: src.transitionStyle, transitionDuration: src.transitionDuration, watermark: src.watermark,
       clips: src.clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, volume: c.volume, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
       ducking: src.ducking, origVolume: src.origVolume, syncMode: src.syncMode, slideDur: src.slideDur,
       ttsEngine: src.ttsEngine, ttsVoice: src.ttsVoice, ttsRate: src.ttsRate, ttsPitch: src.ttsPitch,
@@ -2706,7 +2716,7 @@ export default function App() {
   }
   function buildProject() {
     const live = timelineContent({
-      captionTimebase, ratio, filterKey, filterIntensity, mode, captions, burnCaptions, overlays, videoOverlays, audioItems, tracks, transition, transitionStyle, transitionDuration,
+      captionTimebase, ratio, filterKey, filterIntensity, mode, captions, burnCaptions, overlays, videoOverlays, audioItems, tracks, transition, transitionStyle, transitionDuration, watermark,
       clips, ducking, origVolume, syncMode, slideDur, ttsEngine, ttsVoice, ttsRate, ttsPitch, aiEdited, keepSegments, autoCut, autoInfo, silenceParams, markers
     })
     return normalizeProject({
@@ -2807,7 +2817,7 @@ export default function App() {
         clips: snapshotHistoryClips(entry.clips), libraryAssets: loadedLibraryAssets, overlays: entry.timeline.overlays, videoOverlays: entry.videoOverlays,
         audioItems: entry.audioItems, tracks: entry.timeline.tracks, captions: entry.captions, captionTimebase: entry.captionTimebase,
         ratio: entry.timeline.ratio, filterKey: entry.timeline.filterKey, filterIntensity: entry.timeline.filterIntensity, mode: entry.timeline.mode,
-        transition: entry.timeline.transition, transitionStyle: entry.timeline.transitionStyle, transitionDuration: entry.timeline.transitionDuration, burnCaptions: entry.timeline.burnCaptions,
+        transition: entry.timeline.transition, transitionStyle: entry.timeline.transitionStyle, transitionDuration: entry.timeline.transitionDuration, burnCaptions: entry.timeline.burnCaptions, watermark: entry.timeline.watermark ?? null,
         origVolume: entry.timeline.origVolume, ducking: entry.timeline.ducking, syncMode: entry.timeline.syncMode, slideDur: entry.timeline.slideDur,
         ttsEngine: entry.timeline.ttsEngine, ttsVoice: entry.timeline.ttsVoice, ttsRate: entry.timeline.ttsRate, ttsPitch: entry.timeline.ttsPitch,
         keepSegments: entry.timeline.keepSegments, autoCut: entry.timeline.autoCut, autoInfo: entry.timeline.autoInfo, aiEdited: entry.timeline.aiEdited,
@@ -2818,7 +2828,7 @@ export default function App() {
     setClips(built); setSelId(built[0]?.id || null); setActiveIdx(0); setCurrent(0)
     setRatio(tl.ratio); setFilterKey(tl.filterKey); setFilterIntensity(tl.filterIntensity); setMode(tl.mode); setTransitionDuration(tl.transitionDuration)
     setCaptions(open.captions); setCaptionTimebase(open.captionTimebase); setBurnCaptions(tl.burnCaptions)
-    setOverlays(tl.overlays); setSelOv(null); setTransition(tl.transition); setTransitionStyle(tl.transitionStyle)
+    setOverlays(tl.overlays); setSelOv(null); setTransition(tl.transition); setTransitionStyle(tl.transitionStyle); setWatermark(tl.watermark ?? null)
     setVideoOverlays(open.videoOverlays); setAudioItems(open.audioItems); setTracks(tl.tracks); setSelItem(null)
     setDucking(tl.ducking)
     setOrigVolume(tl.origVolume)
@@ -2842,7 +2852,7 @@ export default function App() {
     return {
       selectedClipId: null, selectedOverlayId: null, activeClipId: null, activeClipIndex: 0,
       clips: [], libraryAssets: libraryAssetsRef.current, overlays: [], videoOverlays: [], audioItems: [], tracks: defaultTracks(), captions: [], captionTimebase: 'timeline',
-      ratio, filterKey: 'none', filterIntensity: 100, mode, transition, transitionStyle, transitionDuration, burnCaptions,
+      ratio, filterKey: 'none', filterIntensity: 100, mode, transition, transitionStyle, transitionDuration, burnCaptions, watermark: null,
       origVolume: 1, ducking, syncMode, slideDur, ttsEngine, ttsVoice, ttsRate, ttsPitch,
       keepSegments: null, autoCut: false, autoInfo: null, aiEdited: false, silenceParams: { threshold: -30, minSilence: 0.4, pad: 0.06 }, markers: []
     }
@@ -3091,7 +3101,7 @@ export default function App() {
           audioItems: [...audioItems.filter((item) => audibleIds.has(item.trackId)), ...overlayAudioItems()],
           origVolume: effOrigVolume, ducking, aiEdited,
           captionTimebase,
-          useGpu, quality, resolution, transition: clips.length > 1 && transition !== 'none'
+          useGpu, quality, resolution, watermark: watermarkForExport(watermark), transition: clips.length > 1 && transition !== 'none'
             ? { type: transition === 'cross' ? 'crossfade' : 'fade', dur: transitionDuration, style: transitionStyle } : undefined
         })
         if (res && res.cancelled) { setStatus(t('export_cancelled')); notify(t('export_cancelled')); return }
@@ -3180,6 +3190,9 @@ export default function App() {
               aiPreviewPath={aiPreviewPath} aiPreviewStart={aiPreviewStart} setAiPreviewStart={setAiPreviewStart}
               aiPreviewDuration={aiPreviewDuration} setAiPreviewDuration={setAiPreviewDuration} aiProcWidth={aiProcWidth} setAiProcWidth={setAiProcWidth}
               faceBusy={faceBusy} faceStatus={faceStatus} cancelFaceOperation={cancelFaceOperation} applyFaceSwap={applyFaceSwap} previewFaceSwap={previewFaceSwap} facePreviewPath={facePreviewPath} pickFaceImage={pickFaceImage} />
+          ) : tab === 'logo' ? (
+            <LogoTab watermark={watermark} patchWatermark={patchWatermark} pushHistory={pushHistory}
+              beginEdit={beginHistoryEdit} endEdit={endHistoryEdit} notify={notify} />
           ) : tab === 'sticker' ? (
             <StickerTab hasClips={hasClips} overlays={overlays} selOv={selOv} setSelOv={setSelOv}
               addSticker={addStickerToV2} videoOverlays={videoOverlays} updateVideoOverlay={updateVideoOverlay} delVideoOverlay={removeVideoOverlay}
@@ -3216,6 +3229,7 @@ export default function App() {
                     onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = clamp(other.sourceTime, 0, Math.max(0, e.currentTarget.duration - 0.02)) } catch {} }}
                     onClick={togglePlay} style={style} />
                 })()}
+                <WatermarkPreview wm={watermark} current={current} total={totalDuration} />
                 {activeVideoOverlays.map((item) => <VideoOverlayPreview key={item.id} item={item} current={current} playing={playing} volume={volume} muted={muted} safeZone={safeZone && ratio !== 'original'}
                   onEditStart={beginHistoryEdit} onEditEnd={endHistoryEdit} onPositionChange={updateVideoOverlay} />)}
                 {safeZone && ratio !== 'original' && (<div className="safe"><div className="sz top" /><div className="sz bottom" /><div className="sz right" /><span className="sz-tip">{t('safezone_tip')}</span></div>)}

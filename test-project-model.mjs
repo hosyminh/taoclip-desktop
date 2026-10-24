@@ -154,6 +154,10 @@ const emojiMigration = normalizeProject({ version: 3, clips: [], overlays: [
   { id: 'old-text', type: 'text', text: 'hi', start: 0, end: 1, x: 0.5, y: 0.5, size: 0.07 }] }, () => 'sticker-test')
 assert.deepEqual(emojiMigration.videoOverlays.map(({ id, sticker, start, out, width }) => [id, sticker, start, out, width]), [['old-fire', 'twemoji/1f525', 0.5, 2, 0.12]])
 assert.deepEqual(emojiMigration.overlays.map((o) => o.id), ['old-dino', 'old-text'])
+// Watermark: moi timeline co the co logo rieng; gia tri sai bi dua ve mac dinh hoac gioi han
+assert.equal(normalizeProject({ version: 3, clips: [] }, () => 'wm-none').timelines[0].watermark, null)
+const watermarkProject = normalizeProject({ version: 3, clips: [], watermark: { path: 'C:/logos/a.png', anchorX: 0, anchorY: 0.7, size: 5, margin: -1, opacity: 0.5, fadeIn: 9 } }, () => 'wm-test')
+assert.deepEqual(watermarkProject.timelines[0].watermark, { path: 'C:/logos/a.png', name: '', enabled: true, anchorX: 0, anchorY: 1, size: 0.5, margin: 0, opacity: 0.5, fadeIn: 3, fadeOut: 0.5 })
 const overlayProject = normalizeProject({ version: 3, clips: [], overlays: [{ id: 'text1', text: 'Xin chào\n{đẹp} \\ test', start: 0.25, end: 1.5, x: 0.2, y: 0.7, align: 'right', zIndex: 4 }] }, () => 'overlay-test')
 assert.deepEqual([overlayProject.overlays[0].align, overlayProject.overlays[0].zIndex, overlayProject.overlays[0].x], ['right', 4, 0.2])
 const overlayAss = captionsModule.toAss([{ start: 0.25, end: 1.5, text: 'Xin chào\n{đẹp} \\ test', pos: { x: 216, y: 1344 }, fs: 120, align: 'right', layer: 4 }], { width: 1080, height: 1920 })

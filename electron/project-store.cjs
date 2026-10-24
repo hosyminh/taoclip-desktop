@@ -11,6 +11,7 @@ function forEachAsset(project, visit) {
     for (const clip of scope.clips || []) visit(clip)
     for (const item of scope.videoOverlays || []) if (!item?.sticker) visit(item)
     for (const item of scope.audioItems || []) visit(item)
+    if (scope.watermark?.path) visit(scope.watermark)
   }
   for (const asset of project.assets || []) visit(asset)
   if (project.music?.path) visit(project.music)

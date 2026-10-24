@@ -867,6 +867,9 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     const speed = Number(item.speed || 1), opacity = Number(item.opacity ?? 1)
     const x = Number(item.x ?? 0.5), y = Number(item.y ?? 0.5), width = Number(item.width ?? 1), height = Number(item.height ?? 1)
     const rotation = Number(item.rotation ?? 0), fadeIn = Number(item.fadeIn ?? 0), fadeOut = Number(item.fadeOut ?? 0)
+    // ax / ay: can hinh trong khung (0 trai/tren, 0.5 giua, 1 phai/duoi) khi hinh nho hon khung, dung cho watermark
+    const ax = Number(item.ax ?? 0.5), ay = Number(item.ay ?? 0.5)
+    if (![ax, ay].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error('Căn lề của track V2 không hợp lệ.')
     if (![rotation, fadeIn, fadeOut].every(Number.isFinite) || Math.abs(rotation) > 360 || fadeIn < 0 || fadeOut < 0) throw new Error('Thông số xoay / mờ của track V2 không hợp lệ.')
     if (![start, sourceIn, sourceOut, speed, opacity, x, y, width, height].every(Number.isFinite) || start < 0 || sourceIn < 0 || sourceOut <= sourceIn || speed <= 0 || opacity < 0 || opacity > 1 || x < 0 || x > 1 || y < 0 || y > 1 || width <= 0 || width > 4 || height <= 0 || height > 4) {
       throw new Error('Thông số track V2 không hợp lệ.')
@@ -877,7 +880,7 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     if (item.kind === 'image' && !item.animated) args.push('-loop', '1', '-framerate', '30', '-i', path.resolve(item.path))
     else if (item.kind === 'image') args.push('-stream_loop', '-1', '-i', path.resolve(item.path))
     else args.push('-ss', String(sourceIn), '-t', String(sourceOut - sourceIn), '-i', path.resolve(item.path))
-    valid.push({ start, end, sourceIn, speed, opacity, x, y, width, height, rotation, flipH: !!item.flipH, flipV: !!item.flipV, fadeIn, fadeOut })
+    valid.push({ start, end, sourceIn, speed, opacity, x, y, width, height, rotation, flipH: !!item.flipH, flipV: !!item.flipV, fadeIn, fadeOut, ax, ay })
   }
   if (!valid.length) return input
   const fc = [`[0:v]fps=30,format=yuv420p,setpts=PTS-STARTPTS[vbase]`]
@@ -893,7 +896,7 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     const turn = item.rotation ? `,rotate=a=${radians}:ow=rotw(${radians}):oh=roth(${radians}):c=black@0` : ''
     const fadeStart = item.start.toFixed(4), fadeEnd = Math.max(item.start, item.end - item.fadeOut).toFixed(4)
     const fades = `${item.fadeIn > 0 ? `,fade=t=in:st=${fadeStart}:d=${item.fadeIn.toFixed(4)}:alpha=1` : ''}${item.fadeOut > 0 ? `,fade=t=out:st=${fadeEnd}:d=${item.fadeOut.toFixed(4)}:alpha=1` : ''}`
-    fc.push(`[${inputIndex}:v]setpts=(PTS-STARTPTS)/${item.speed}+${item.start}/TB${flips},scale=${boxW}:${boxH}:force_original_aspect_ratio=decrease,format=rgba,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0${turn}${fades},colorchannelmixer=aa=${item.opacity}${layer}`)
+    fc.push(`[${inputIndex}:v]setpts=(PTS-STARTPTS)/${item.speed}+${item.start}/TB${flips},scale=${boxW}:${boxH}:force_original_aspect_ratio=decrease,format=rgba,pad=${boxW}:${boxH}:(ow-iw)*${item.ax}:(oh-ih)*${item.ay}:color=black@0${turn}${fades},colorchannelmixer=aa=${item.opacity}${layer}`)
     fc.push(`${base}${layer}overlay=x=${cx}-w/2:y=${cy}-h/2:enable='between(t,${item.start.toFixed(4)},${item.end.toFixed(4)})':eof_action=pass:shortest=0:format=auto${out}`)
     base = out
   })

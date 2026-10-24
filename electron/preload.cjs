@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('taoclip', {
   // Lay duong dan that cua file keo-tha (Electron 32+ da go File.path)
   getDroppedPath: (file) => webUtils.getPathForFile(file),
   probe: (filePath) => ipcRenderer.invoke('video:probe', filePath),
+  logoPick: () => ipcRenderer.invoke('logos:pick'),
+  logoList: () => ipcRenderer.invoke('logos:list'),
+  logoSave: (payload) => ipcRenderer.invoke('logos:save', payload),
+  logoRemove: (id) => ipcRenderer.invoke('logos:remove', id),
   inspectMedia: (filePath) => ipcRenderer.invoke('media:inspect', filePath),
   createPreviewProxy: (filePath) => ipcRenderer.invoke('video:createPreviewProxy', filePath),
   renderFilterPreview: (request) => ipcRenderer.invoke('video:filterPreview', request),

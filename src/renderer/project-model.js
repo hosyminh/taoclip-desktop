@@ -18,6 +18,7 @@ const DEFAULTS = Object.freeze({
   transition: 'none',
   transitionStyle: DEFAULT_TRANSITION_STYLE,
   transitionDuration: 0.5,
+  watermark: null,
   clips: [],
   assets: [],
   ducking: true,
@@ -358,6 +359,7 @@ function normalizeTimeline(migrated, makeId) {
     filterIntensity,
     transitionStyle,
     transitionDuration,
+    watermark: normalizeWatermark(migrated.watermark),
     clips: normalizedClips,
     overlays: normalizedOverlays,
     tracks,
@@ -370,6 +372,32 @@ function normalizeTimeline(migrated, makeId) {
     markers: normalizedMarkers,
     autoCut: !!migrated.autoCut,
     autoInfo
+  }
+}
+
+// Watermark (logo goc, hien suot video): vi tri theo luoi 3x3 (0 = trai/tren, 0.5 = giua, 1 = phai/duoi).
+// Kich thuoc va le tinh theo canh ngan nhat cua khung, nen cung mot cach o preview va khi xuat.
+const WATERMARK_AXIS = [0, 0.5, 1]
+export const DEFAULT_WATERMARK = Object.freeze({ path: '', name: '', enabled: false, anchorX: 1, anchorY: 1, size: 0.18, margin: 0.03, opacity: 0.9, fadeIn: 0.5, fadeOut: 0.5 })
+
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value)
+  return Math.min(max, Math.max(min, Number.isFinite(number) ? number : fallback))
+}
+
+function normalizeWatermark(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    path: typeof raw.path === 'string' ? raw.path : '',
+    name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : '',
+    enabled: raw.enabled !== false,
+    anchorX: WATERMARK_AXIS.includes(Number(raw.anchorX)) ? Number(raw.anchorX) : DEFAULT_WATERMARK.anchorX,
+    anchorY: WATERMARK_AXIS.includes(Number(raw.anchorY)) ? Number(raw.anchorY) : DEFAULT_WATERMARK.anchorY,
+    size: clampNumber(raw.size, DEFAULT_WATERMARK.size, 0.02, 0.5),
+    margin: clampNumber(raw.margin, DEFAULT_WATERMARK.margin, 0, 0.2),
+    opacity: clampNumber(raw.opacity, DEFAULT_WATERMARK.opacity, 0.1, 1),
+    fadeIn: clampNumber(raw.fadeIn, DEFAULT_WATERMARK.fadeIn, 0, 3),
+    fadeOut: clampNumber(raw.fadeOut, DEFAULT_WATERMARK.fadeOut, 0, 3)
   }
 }
 

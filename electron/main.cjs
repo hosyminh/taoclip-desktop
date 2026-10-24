@@ -59,6 +59,8 @@ const outputStore = require('./output-store.cjs')
 const recoveryStore = require('./recovery-store.cjs')
 const settingsStore = require('./settings.cjs')
 const stickers = require('./stickers.cjs')
+const logoLibrary = require('./logo-library.cjs')
+logoLibrary.configure(app.getPath('userData'))
 settingsStore.configure({ app, safeStorage })
 const PREVIEW_PROXY_JOBS = new Map()
 const DOWNLOAD_JOBS = new Map()
@@ -737,14 +739,44 @@ async function coreExport(opts, output, onProgress) {
   })
 }
 
+// Thu vien logo: chon file tren may (PNG/SVG) de renderer doc; luu/liet ke/xoa nam trong logo-library.cjs
+ipcMain.handle('logos:pick', async () => {
+  const res = await dialog.showOpenDialog({
+    title: 'Chọn logo (PNG hoặc SVG)', properties: ['openFile'],
+    filters: [{ name: 'Logo', extensions: ['png', 'svg'] }]
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  const file = res.filePaths[0]
+  if (fs.statSync(file).size > logoLibrary.MAX_BYTES) throw new Error('Logo quá lớn (tối đa 8 MB).')
+  return { name: path.basename(file, path.extname(file)), ext: path.extname(file).slice(1).toLowerCase(), base64: fs.readFileSync(file).toString('base64') }
+})
+ipcMain.handle('logos:list', () => logoLibrary.list())
+ipcMain.handle('logos:save', (_event, payload) => logoLibrary.save(payload || {}))
+ipcMain.handle('logos:remove', (_event, id) => logoLibrary.remove(String(id || '')))
+
 // Huy lan xuat dang chay (kill ffmpeg + bo cac buoc sau)
 ipcMain.handle('export:cancel', (_event, jobId) => ops.cancelJob(jobId))
+
+// Watermark (logo goc, hien suot video) thanh item V2: o vuong canh L = size x canh ngan nhat khung, hinh can trong o theo ax/ay,
+// le = margin x canh ngan nhat. Cung cong thuc voi WatermarkPreview o renderer (cqmin).
+function watermarkOverlay(wm, width, height) {
+  const short = Math.min(width, height)
+  const side = wm.size * short
+  const margin = wm.margin * short
+  const center = (anchor, length) => (anchor === 0 ? margin + side / 2 : anchor === 1 ? length - margin - side / 2 : length / 2)
+  return {
+    path: wm.path, name: wm.name || 'watermark', kind: 'image', start: 0, in: 0, out: 1e6, speed: 1, zIndex: 1e6,
+    x: center(wm.anchorX, width) / width, y: center(wm.anchorY, height) / height, width: side / width, height: side / height,
+    opacity: wm.opacity, ax: wm.anchorX, ay: wm.anchorY, fadeIn: wm.fadeIn, fadeOut: wm.fadeOut
+  }
+}
 
 // Xuat video: core (cat/toc do/khung/loc mau/ghep clip) -> khac phu de -> tron am thanh
 ipcMain.handle('video:export', async (event, opts) => {
   const sourcePaths = [
     ...(Array.isArray(opts?.clips) ? opts.clips.map((clip) => clip?.input) : []),
     ...(Array.isArray(opts?.videoOverlays) ? opts.videoOverlays.filter((item) => !item?.sticker).map((item) => item?.path) : []),
+    ...(opts?.watermark?.path ? [opts.watermark.path] : []),
     ...(Array.isArray(opts?.audioItems) ? opts.audioItems.map((item) => item?.path) : []),
     ...(opts?.music ? [opts.music.path] : []), ...(opts?.voice ? [opts.voice.path] : []),
     ...(opts?.bgAudio ? [opts.bgAudio] : [])
@@ -801,7 +833,8 @@ async function runExport(event, opts) {
   ops.setOutputProfile({ quality: opts.quality, resolution: opts.resolution })
   const capBurn = opts.captions && opts.captions.length && opts.burnCaptions
   const hasOverlays = opts.overlays && opts.overlays.length
-  const hasVideoOverlays = opts.videoOverlays && opts.videoOverlays.length
+  const watermark = opts.watermark?.path && opts.watermark.enabled !== false ? opts.watermark : null
+  const hasVideoOverlays = Boolean(opts.videoOverlays && opts.videoOverlays.length) || Boolean(watermark)
   const burning = capBurn || hasOverlays
   // Cac track am thanh them: nhac nen + long tieng CUNG LUC (opts.music/opts.voice)
   // Van nhan opts.bgAudio (payload cu, 1 track) de tuong thich nguoc
@@ -891,8 +924,13 @@ async function runExport(event, opts) {
       const dims = await ops.probe(cur)
       // Sticker: asar khong doc duoc bang ffmpeg, copy PNG ra thu muc tam truoc
       const stickerBase = app.isPackaged ? path.join(__dirname, '..', 'dist') : path.join(__dirname, '..', 'src', 'renderer', 'public')
+      const overlays = stickers.materializeStickers(opts.videoOverlays, tmpDir, stickerBase)
+      if (watermark) {
+        if (!fs.existsSync(watermark.path)) throw new Error('Không tìm thấy file logo watermark. Hãy chọn lại logo.')
+        overlays.push(watermarkOverlay(watermark, dims.width, dims.height))
+      }
       await ops.compositeVideoOverlays({
-        input: cur, overlays: stickers.materializeStickers(opts.videoOverlays, tmpDir, stickerBase), output: opts.output,
+        input: cur, overlays, output: opts.output,
         onProgress: (pct) => stageReport(pct)
       })
       si++
