@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('taoclip', {
   logoList: () => ipcRenderer.invoke('logos:list'),
   logoSave: (payload) => ipcRenderer.invoke('logos:save', payload),
   logoRemove: (id) => ipcRenderer.invoke('logos:remove', id),
+  logoUsePreset: (id) => ipcRenderer.invoke('logos:usePreset', id),
   inspectMedia: (filePath) => ipcRenderer.invoke('media:inspect', filePath),
   createPreviewProxy: (filePath) => ipcRenderer.invoke('video:createPreviewProxy', filePath),
   renderFilterPreview: (request) => ipcRenderer.invoke('video:filterPreview', request),

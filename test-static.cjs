@@ -133,6 +133,18 @@ const groupKeys = [...catalogSource.matchAll(/key: '(sticker_group_[a-z]+)'/g)].
 const groupKeysMissing = groupKeys.flatMap((key) => ['vi', 'en'].filter((lang) => !dictionaries[lang].has(key)).map((lang) => `${key} (${lang})`))
 check(`moi nhom sticker (${groupKeys.length}) co nhan trong i18n vi va en`, groupKeys.length > 0 && groupKeysMissing.length === 0, groupKeysMissing)
 
+// 5) Logo mau: moi mau co anh PNG; moi hinh va mau co nhan trong i18n (LogoTab goi t('logo_shape_<hinh>') theo mau dong)
+const presetSource = fs.readFileSync(path.join(rendererDir, 'logo-presets.js'), 'utf8')
+const presetList = (name) => [...presetSource.matchAll(new RegExp(name + ' = \\[([^\\]]*)\\]', 'g'))].flatMap((m) => [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]))
+const presetShapes = presetList('LOGO_PRESET_SHAPES')
+const presetColors = presetList('LOGO_PRESET_COLORS')
+const presetFiles = presetShapes.flatMap((shape) => presetColors.map((color) => `${shape}-${color}`))
+const missingPresetPng = presetFiles.filter((id) => !fs.existsSync(path.join(rendererDir, 'public', 'logos', 'presets', `${id}.png`)))
+check(`moi logo mau (${presetFiles.length}) co anh PNG trong public/logos/presets`, presetFiles.length > 0 && missingPresetPng.length === 0, missingPresetPng)
+const presetKeys = [...presetShapes.map((shape) => `logo_shape_${shape}`), ...presetColors.map((color) => `logo_color_${color}`)]
+const presetKeysMissing = presetKeys.flatMap((key) => ['vi', 'en'].filter((lang) => !dictionaries[lang].has(key)).map((lang) => `${key} (${lang})`))
+check(`moi nhan logo mau (${presetKeys.length}) co trong i18n vi va en`, presetKeys.length > 0 && presetKeysMissing.length === 0, presetKeysMissing)
+
 // Xuat: moi thuoc tinh cua lop hinh phai duoc map tu state sang payload gui bo ghep (de quen thi xoay / lat / mo chi co o xem truoc)
 const appSource = fs.readFileSync(path.join(rendererDir, 'App.jsx'), 'utf8')
 const overlayProps = ['rotation', 'flipH', 'flipV', 'fadeIn', 'fadeOut', 'opacity', 'width', 'height', 'sticker']

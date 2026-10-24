@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { useI18n } from '../i18n.jsx'
 import { fileUrl } from '../utils.js'
 import { DEFAULT_WATERMARK } from '../project-model.js'
+import { LOGO_PRESETS, logoPresetUrl } from '../logo-presets.js'
 
 // Luoi 3x3 vi tri: [anchorX, anchorY, mui ten]; 0 trai/tren, 0.5 giua, 1 phai/duoi
 const ANCHORS = [[0, 0, '↖'], [0.5, 0, '↑'], [1, 0, '↗'], [0, 0.5, '←'], [0.5, 0.5, '•'], [1, 0.5, '→'], [0, 1, '↙'], [0.5, 1, '↓'], [1, 1, '↘']]
@@ -74,6 +75,17 @@ export default function LogoTab({ watermark, patchWatermark, pushHistory, beginE
     patchWatermark({ path: entry.path, name: entry.name, enabled: true })
   }
 
+  // Mau co san: main sao chep vao thu vien (mot ban cho moi mau) roi dung nhu logo cua nguoi dung
+  async function usePresetLogo(preset) {
+    try {
+      const entry = await window.taoclip.logoUsePreset(preset.id)
+      setLibrary((items) => (items.some((item) => item.id === entry.id) ? items : [...items, entry]))
+      useLogo(entry)
+    } catch (error) {
+      notify(error.message || String(error), 'err')
+    }
+  }
+
   async function removeLogo(entry) {
     if (!window.confirm(t('logo_remove_confirm'))) return
     try {
@@ -101,6 +113,18 @@ export default function LogoTab({ watermark, patchWatermark, pushHistory, beginE
           ))}
         </div>
       )}
+
+      <label className="grp-lbl">{t('logo_presets')}</label>
+      <div className="logo-grid">
+        {LOGO_PRESETS.map((preset) => (
+          <div key={preset.id} className="logo-card">
+            <button className="logo-pick" title={`${t(`logo_shape_${preset.shape}`)} · ${t(`logo_color_${preset.color}`)}`} onClick={() => usePresetLogo(preset)}>
+              <img src={logoPresetUrl(preset.id)} alt="" draggable={false} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <small className="cap-hint">{t('logo_presets_hint')}</small>
 
       <div className="grp" style={{ marginTop: 6 }}>
         <label className="chk"><input type="checkbox" checked={!!wm.enabled && !!wm.path} disabled={!wm.path} onChange={(e) => { pushHistory(); patchWatermark({ enabled: e.target.checked }) }} /> {t('logo_watermark_on')}</label>
