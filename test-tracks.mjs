@@ -22,26 +22,30 @@ test('parseTrackId nhan dung V/A va tu choi ten la', () => {
   for (const bad of ['V0', 'X1', 'v1', '', null, 'V', 'A1.5']) assert.equal(parseTrackId(bad), null, String(bad))
 })
 
-const CORE = ['V1', 'V2', 'V3', 'V4', 'A1', 'A2', 'A3', 'A4']
+const CORE = ['V1', 'V2', 'V3', 'A1', 'A2', 'A3']
 
-test('mac dinh co san V1..V4 va A1..A4 (3 duong hinh + 3 duong tieng de tha long nhau); track tu so 5 moi la track them', () => {
-  assert.equal(MIN_LANES, 4)
+test('mac dinh co san V1..V3 va A1..A3 (2 duong hinh phu + 2 duong tieng phu de tha long nhau); track tu so 4 moi la track them', () => {
+  assert.equal(MIN_LANES, 3)
   assert.deepEqual(ids(defaultTracks()), CORE)
   assert.deepEqual(ids(normalizeTracks([])), CORE)
   assert.deepEqual(ids(normalizeTracks(defaultTracks())), CORE, 'chuan hoa lap lai khong doi')
-  assert.deepEqual(['V1', 'A4', 'V4'].map(isCoreTrack), [true, true, true])
-  assert.deepEqual(['V5', 'A6', 'junk', null].map(isCoreTrack), [false, false, false, false])
+  assert.deepEqual(['V1', 'A3', 'V3'].map(isCoreTrack), [true, true, true])
+  assert.deepEqual(['V4', 'A6', 'junk', null].map(isCoreTrack), [false, false, false, false])
 })
 
-test('normalizeTracks bo rac, khong trung, sap xep video truoc audio, giu track them tu so 5', () => {
+test('normalizeTracks bo rac, khong trung, sap xep video truoc audio, giu track them tu so 4', () => {
   const messy = normalizeTracks([{ id: 'A3', muted: 1 }, { id: 'junk' }, { id: 'V2', name: '  Phu  ' }, { id: 'A3', muted: false }, null], ['V6', 'A2', 'nope'])
-  assert.deepEqual(ids(messy), ['V1', 'V2', 'V3', 'V4', 'V6', 'A1', 'A2', 'A3', 'A4'])
+  assert.deepEqual(ids(messy), ['V1', 'V2', 'V3', 'V6', 'A1', 'A2', 'A3'])
   assert.equal(messy.find((track) => track.id === 'A3').muted, true, 'ban dau tien thang khi trung id')
   assert.equal(messy.find((track) => track.id === 'V2').name, 'Phu')
   assert.equal(nextTrackNumber(messy, 'video'), 7)
-  assert.equal(nextTrackNumber(messy, 'audio'), 5)
-  assert.deepEqual(ids(videoTracksOf(messy)), ['V1', 'V2', 'V3', 'V4', 'V6'])
-  assert.deepEqual(ids(audioTracksOf(messy)), ['A1', 'A2', 'A3', 'A4'])
+  assert.equal(nextTrackNumber(messy, 'audio'), 4)
+  assert.deepEqual(ids(videoTracksOf(messy)), ['V1', 'V2', 'V3', 'V6'])
+  assert.deepEqual(ids(audioTracksOf(messy)), ['A1', 'A2', 'A3'])
+  // du an cu da luu V4 / A4 thi giu nguyen (khong phai track co san nua, nen xoa duoc khi trong)
+  const legacy = normalizeTracks([{ id: 'V4' }, { id: 'A4', name: 'Nhac 2' }])
+  assert.deepEqual(ids(legacy), ['V1', 'V2', 'V3', 'V4', 'A1', 'A2', 'A3', 'A4'])
+  assert.deepEqual(['V4', 'A4'].map(isCoreTrack), [false, false])
 })
 
 test('layerIndex / withLayerZIndex: track cao hon nam lop tren', () => {
@@ -72,11 +76,11 @@ test('choosePlacement video: track phu dau tien la V2, va cham -> V3, sat nhau v
   place = choosePlacement({ tracks, items, kind: 'video', preferred: 'V1', span: { start: 0, end: 1 } })
   assert.equal(place.trackId, 'V3', 'V1 la track chinh, khong dat item phu len do')
   place = choosePlacement({ tracks, items, kind: 'video', preferred: 'V2', span: { start: 5, end: 6 }, forceNew: true })
-  assert.equal(place.trackId, 'V5'); assert.equal(place.created.id, 'V5', 'forceNew tao track sau V4')
-  // V2..V4 deu kin: tao V5
-  items = [item('a', 'V2', 0, 9), item('b', 'V3', 0, 9), item('c', 'V4', 0, 9)]
+  assert.equal(place.trackId, 'V4'); assert.equal(place.created.id, 'V4', 'forceNew tao track sau V3')
+  // V2, V3 deu kin: tao V4
+  items = [item('a', 'V2', 0, 9), item('b', 'V3', 0, 9)]
   place = choosePlacement({ tracks, items, kind: 'video', preferred: 'V2', span: { start: 1, end: 2 } })
-  assert.equal(place.trackId, 'V5'); assert.equal(place.created.id, 'V5')
+  assert.equal(place.trackId, 'V4'); assert.equal(place.created.id, 'V4')
 })
 
 test('choosePlacement bo qua track khoa va doi duoc theo track da co', () => {
@@ -93,8 +97,8 @@ test('choosePlacement audio: tieng goc cua V1 tren A1 la khoang bi chiem', () =>
   assert.equal(choosePlacement({ tracks, items: [], kind: 'audio', preferred: 'A1', span: { start: 5, end: 6 }, extraByTrack: extra }).trackId, 'A1')
   const next = choosePlacement({ tracks, items: [item('x', 'A2', 0, 9)], kind: 'audio', preferred: 'A1', span: { start: 1, end: 2 }, extraByTrack: extra })
   assert.equal(next.trackId, 'A3'); assert.equal(next.created, null, 'A3 da co san')
-  const full = choosePlacement({ tracks, items: [item('x', 'A2', 0, 9), item('y', 'A3', 0, 9), item('z', 'A4', 0, 9)], kind: 'audio', preferred: 'A1', span: { start: 1, end: 2 }, extraByTrack: extra })
-  assert.equal(full.trackId, 'A5'); assert.equal(full.created.id, 'A5')
+  const full = choosePlacement({ tracks, items: [item('x', 'A2', 0, 9), item('y', 'A3', 0, 9)], kind: 'audio', preferred: 'A1', span: { start: 1, end: 2 }, extraByTrack: extra })
+  assert.equal(full.trackId, 'A4'); assert.equal(full.created.id, 'A4')
 })
 
 test('choosePlacement tao dung track duoc yeu cau khi chua ton tai', () => {
@@ -127,8 +131,8 @@ test('assignDefaultTracks xep item cu theo thoi gian, chong nhau thi sang track 
 
 test('audibleTrackIds / visibleVideoTrackIds theo mute, solo, hidden', () => {
   let tracks = normalizeTracks([{ id: 'A2', muted: true }, { id: 'V2', hidden: true }])
-  assert.deepEqual([...audibleTrackIds(tracks)].sort(), ['A1', 'A3', 'A4'])
-  assert.deepEqual([...visibleVideoTrackIds(tracks)], ['V1', 'V3', 'V4'])
+  assert.deepEqual([...audibleTrackIds(tracks)].sort(), ['A1', 'A3'])
+  assert.deepEqual([...visibleVideoTrackIds(tracks)], ['V1', 'V3'])
   tracks = normalizeTracks([{ id: 'A1' }, { id: 'A2', solo: true }, { id: 'A3', muted: true, solo: true }])
   assert.deepEqual([...audibleTrackIds(tracks)], ['A2'], 'co solo -> chi nghe track solo chua tat tieng')
 })

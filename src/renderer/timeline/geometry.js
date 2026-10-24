@@ -3,6 +3,9 @@ export const ASSET_DRAG_TYPE = 'application/x-taoclip-asset' // asset thu vien k
 export const HEAD_W = 96 // be rong cot tieu de track (px); thoi diem t nam o x = HEAD_W + t * pps trong .cc-tlinner
 export const TAIL_PX = 56 // doan dem sau cuoi timeline (< le cua fitPps de "Vua khung" van khong sinh thanh cuon ngang)
 export const ROW_HEIGHT = { main: 64, overlay: 42, text: 32, audio: 44 }
+// Chieu cao panel timeline vua du hien V1..V3 + hang chu + A1..A3 (tay keo 5 + tab 32 + thanh cong cu 42 + thuoc 26 + cac hang + vung tha duong moi 28);
+// mac dinh khong cao hon muc nay de cua so cao khong bi chiem them cho trong
+export const TL_FIT_HEIGHT = 5 + 32 + 42 + 26 + ROW_HEIGHT.main + 2 * ROW_HEIGHT.overlay + ROW_HEIGHT.text + 3 * ROW_HEIGHT.audio + 28
 
 // Thu phong: toi thieu 0.05 px/giay (3 gio vua ~540px) toi da 300 px/giay; moi nac nhan ZOOM_STEP de muc nao cung muot
 export const PPS_MIN = 0.05

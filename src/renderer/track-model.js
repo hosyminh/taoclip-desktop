@@ -23,8 +23,9 @@ export function makeTrack(kind, number, patch = {}) {
   return { id, kind, name: id, muted: false, hidden: false, locked: false, solo: false, ...patch, ...{ id, kind } }
 }
 
-// Moi timeline luon co san V1..V4 va A1..A4 (hien ra de keo tha long nhau, khong can bam them track); co the them nua, bo duoc track thua tu so 5
-export const MIN_LANES = 4
+// Moi timeline luon co san V1..V3 va A1..A3 (du de keo tha long nhau ngay, timeline mo ra gon); them duong bang nut +, bo duoc duong thua tu so 4
+// (du an cu da luu V4 / A4 thi giu nguyen, khi trong thi co nut xoa)
+export const MIN_LANES = 3
 export const isCoreTrack = (id) => (parseTrackId(id)?.number ?? Infinity) <= MIN_LANES
 export function defaultTracks() { return normalizeTracks([]) }
 
@@ -33,7 +34,7 @@ export const videoTracksOf = (tracks) => tracks.filter((track) => track.kind ===
 export const audioTracksOf = (tracks) => tracks.filter((track) => track.kind === 'audio').sort(byNumber)
 export function trackById(tracks, id) { return tracks.find((track) => track.id === id) || null }
 
-/** Gia tri hop le cua danh sach track: luon co V1..V4 va A1..A4, moi trackId dang duoc dung deu ton tai, sap xep V1..Vn roi A1..An. */
+/** Gia tri hop le cua danh sach track: luon co V1..V3 va A1..A3, moi trackId dang duoc dung deu ton tai, sap xep V1..Vn roi A1..An. */
 export function normalizeTracks(input, usedTrackIds = []) {
   const result = new Map()
   for (const raw of Array.isArray(input) ? input : []) {

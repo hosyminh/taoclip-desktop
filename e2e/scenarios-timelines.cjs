@@ -317,11 +317,11 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
       // o "+ Track" luon thay duoc, bam la them duong
       check('o "+ Track hinh" / "+ Track tieng" thay duoc khi khong keo', (await app.text('.cc-newtrack.video')).includes('Track hình') && (await app.text('.cc-newtrack.audio')).includes('Track tiếng'))
       await app.click('.cc-newtrack.video')
-      await app.waitFor(`!!document.querySelector('.cc-trow[data-track-id="V5"]')`, { label: 'V5 tu o +' })
+      await app.waitFor(`!!document.querySelector('.cc-trow[data-track-id="V4"]')`, { label: 'V4 tu o +' })
       await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 99999`)
       await app.click('.cc-newtrack.audio')
-      await app.waitFor(`!!document.querySelector('.cc-trow[data-track-id="A5"]')`, { label: 'A5 tu o +' })
-      check('bam o "+" them V5 va A5', true)
+      await app.waitFor(`!!document.querySelector('.cc-trow[data-track-id="A4"]')`, { label: 'A4 tu o +' })
+      check('bam o "+" them V4 va A4', true)
       // ten luu trong file va doc lai
       await app.key('s', 2)
       await app.waitFor(`document.querySelector('.cc-proj').title.endsWith('multi-trackname.taoclip')`, { label: 'luu' })
@@ -613,25 +613,25 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
     try {
       await app.restoreProject()
       const rowIds = () => app.eval(`[...document.querySelectorAll('.cc-trow')].map((r) => r.dataset.trackId).join()`)
-      check('mac dinh hien du 8 duong', (await rowIds()) === 'V4,V3,V2,V1,A1,A2,A3,A4', await rowIds())
+      check('mac dinh hien du 6 duong', (await rowIds()) === 'V3,V2,V1,A1,A2,A3', await rowIds())
       check('chua co canh bao qua nhieu lop (V1 + 1 lop phu)', (await app.count('.tb-warn')) === 0)
       await app.click('.tb-compact')
       await app.waitFor(`document.querySelectorAll('.cc-trow').length === 4`, { label: 'thu gon' })
       check('thu gon: chi con V3 (co item), V1, A1, A2 (co item)', (await rowIds()) === 'V3,V1,A1,A2', await rowIds())
-      check('nut thu gon bao so duong dang an (4)', (await app.text('.tb-compact small')) === '4')
+      check('nut thu gon bao so duong dang an (2)', (await app.text('.tb-compact small')) === '2')
       // keo file -> hien du duong de tha
       const data = { items: [], files: [fx.image.split('/').join(String.fromCharCode(92))], dragOperationsMask: 1 }
       await app.send('Input.dispatchDragEvent', { type: 'dragEnter', x: 640, y: 300, data })
       await app.send('Input.dispatchDragEvent', { type: 'dragOver', x: 640, y: 300, data })
-      await app.waitFor(`document.querySelectorAll('.cc-trow').length === 8`, { label: 'hien du khi keo' })
-      check('dang keo file: hien lai du 8 duong de tha vao', true)
+      await app.waitFor(`document.querySelectorAll('.cc-trow').length === 6`, { label: 'hien du khi keo' })
+      check('dang keo file: hien lai du 6 duong de tha vao', true)
       // roi khoi cua so khi dang keo (dragleave khong co relatedTarget)
       await app.eval(`document.querySelector('.cc').dispatchEvent(new DragEvent('dragleave', { bubbles: true, relatedTarget: null }))`)
       await app.waitFor(`document.querySelectorAll('.cc-trow').length === 4`, { label: 'thu gon lai' })
       check('keo xong: thu gon lai', true)
       await app.click('.tb-compact')
-      await app.waitFor(`document.querySelectorAll('.cc-trow').length === 8`, { label: 'mo rong' })
-      check('bam lai: hien du 8 duong', true)
+      await app.waitFor(`document.querySelectorAll('.cc-trow').length === 6`, { label: 'mo rong' })
+      check('bam lai: hien du 6 duong', true)
       check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
     } finally { app.close() }
 
@@ -1120,7 +1120,7 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
     try {
       await app.restoreProject()
       await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
-      const tops = () => app.eval(`JSON.stringify(['V4', 'V3', 'V1', 'A1', 'A4'].map((id) => Math.round(document.querySelector('.cc-trow[data-track-id="' + id + '"]').getBoundingClientRect().top)))`)
+      const tops = () => app.eval(`JSON.stringify(['V3', 'V2', 'V1', 'A1', 'A3'].map((id) => Math.round(document.querySelector('.cc-trow[data-track-id="' + id + '"]').getBoundingClientRect().top)))`)
       const before = await tops()
       const data = { items: [], files: [winPath(fx.image)], dragOperationsMask: 1 }
       const drag = (type, x, y) => app.send('Input.dispatchDragEvent', { type, x, y, data })
@@ -1154,25 +1154,26 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
   })
 
   // 3 duong hinh + 3 duong tieng co san de tha long nhau
-  scenario('duong san co V1..V4 / A1..A4: tha long nhau ngay khong can them track', async () => {
+  scenario('duong san co V1..V3 / A1..A3: tha long nhau ngay khong can them track, het duong thi them V4 / A4', async () => {
     const app = await launchApp({ project: projectOf(fx) })
     try {
       await app.restoreProject()
       const rowIds = () => app.eval(`[...document.querySelectorAll('.cc-trow')].map((r) => r.dataset.trackId).join()`)
       const trackOf = (selector) => app.eval(`[...document.querySelectorAll(${JSON.stringify(selector)})].map((el) => el.closest('.cc-trow').dataset.trackId).sort().join()`)
-      check('moi du an mo ra co san 4 duong hinh va 4 duong tieng', (await rowIds()) === 'V4,V3,V2,V1,A1,A2,A3,A4', await rowIds())
-      // 3 anh cung thoi diem, moi anh tha thang vao mot duong: long nhau tren V2, V3, V4
-      for (const id of ['V2', 'V3', 'V4']) await app.dropOnLane({ files: [winPath(fx.image)], row: `.cc-trow[data-track-id="${id}"]`, time: 1 })
-      await app.waitFor(`document.querySelectorAll('.cc-v2-clip').length === 3`, { label: '3 anh long nhau' })
-      check('3 anh cung thoi diem nam dung V2, V3, V4 (long nhau, khong sinh track moi)', (await trackOf('.cc-v2-clip')) === 'V2,V3,V4' && (await app.count('.cc-trow')) === 8)
-      // 3 audio cung thoi diem tren A2, A3, A4
-      for (const [id, file] of [['A2', fx.toneA], ['A3', fx.toneB], ['A4', fx.toneA]]) await app.dropOnLane({ files: [winPath(file)], row: `.cc-trow[data-track-id="${id}"]`, time: 1 })
-      await app.waitFor(`document.querySelectorAll('.cc-audio-item-clip').length === 3`, { label: '3 audio long nhau' })
-      check('3 audio cung thoi diem nam dung A2, A3, A4', (await trackOf('.cc-audio-item-clip')) === 'A2,A3,A4' && (await app.count('.cc-trow')) === 8)
-      // tha them anh vao V4 dang kin -> tu sang track moi V5
-      await app.dropOnLane({ files: [winPath(fx.image)], row: '.cc-trow[data-track-id="V4"]', time: 1.5 })
-      await app.waitFor(`document.querySelectorAll('.cc-v2-clip').length === 4`, { label: 'anh thu 4' })
-      check('V4 dang kin -> anh tiep theo len V5 (them track khi het duong)', (await trackOf('.cc-v2-clip')) === 'V2,V3,V4,V5')
+      check('moi du an mo ra co san 3 duong hinh va 3 duong tieng (V4 / A4 an, nguoi dung tu them khi can)', (await rowIds()) === 'V3,V2,V1,A1,A2,A3', await rowIds())
+      check('timeline mo ra gon: noi dung cac duong cao khong qua 380px (truoc day 8 duong ~452px)', (await app.eval(`document.querySelector('.cc-tlscroll').scrollHeight`)) <= 380, String(await app.eval(`document.querySelector('.cc-tlscroll').scrollHeight`)))
+      // 2 anh cung thoi diem, moi anh tha thang vao mot duong: long nhau tren V2, V3
+      for (const id of ['V2', 'V3']) await app.dropOnLane({ files: [winPath(fx.image)], row: `.cc-trow[data-track-id="${id}"]`, time: 1 })
+      await app.waitFor(`document.querySelectorAll('.cc-v2-clip').length === 2`, { label: '2 anh long nhau' })
+      check('2 anh cung thoi diem nam dung V2, V3 (long nhau, khong sinh track moi)', (await trackOf('.cc-v2-clip')) === 'V2,V3' && (await app.count('.cc-trow')) === 6)
+      // 2 audio cung thoi diem tren A2, A3
+      for (const [id, file] of [['A2', fx.toneA], ['A3', fx.toneB]]) await app.dropOnLane({ files: [winPath(file)], row: `.cc-trow[data-track-id="${id}"]`, time: 1 })
+      await app.waitFor(`document.querySelectorAll('.cc-audio-item-clip').length === 2`, { label: '2 audio long nhau' })
+      check('2 audio cung thoi diem nam dung A2, A3', (await trackOf('.cc-audio-item-clip')) === 'A2,A3' && (await app.count('.cc-trow')) === 6)
+      // tha them anh vao V3 dang kin -> tu sang track moi V4
+      await app.dropOnLane({ files: [winPath(fx.image)], row: '.cc-trow[data-track-id="V3"]', time: 1.5 })
+      await app.waitFor(`document.querySelectorAll('.cc-v2-clip').length === 3`, { label: 'anh thu 3' })
+      check('V3 dang kin -> anh tiep theo len V4 (them track khi het duong)', (await trackOf('.cc-v2-clip')) === 'V2,V3,V4')
       check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
     } finally { app.close() }
   })

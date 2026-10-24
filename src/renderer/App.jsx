@@ -20,7 +20,7 @@ import TransTab from './tabs/TransTab.jsx'
 import Timeline from './timeline/Timeline.jsx'
 import ContextMenu from './timeline/ContextMenu.jsx'
 import { MIN_PIECE, FREEZE_SECONDS, splitTimelineItem, insertFreezeFrame, duplicateClipAfter, mergeClipCaptions, splitAnchoredCaptions, rippleItems, rippleOverlays } from './timeline/clip-commands.js'
-import { clientXToTime as geometryClientXToTime, ASSET_DRAG_TYPE, HEAD_W, ZOOM_STEP, clampPps, fitPps, tickStep } from './timeline/geometry.js'
+import { clientXToTime as geometryClientXToTime, ASSET_DRAG_TYPE, HEAD_W, ZOOM_STEP, TL_FIT_HEIGHT, clampPps, fitPps, tickStep } from './timeline/geometry.js'
 import {
   defaultTracks, normalizeTracks, makeTrack, nextTrackNumber, choosePlacement, itemSpan, clipAudioSpans, layerIndex, withLayerZIndex,
   audibleTrackIds, visibleVideoTrackIds, insertIndexForTime, buildDetachedAudioItem, isCoreTrack, MAIN_VIDEO_TRACK, MAIN_AUDIO_TRACK
@@ -256,7 +256,7 @@ export default function App() {
   // keo gian panel (nho kich thuoc)
   const [libW, setLibW] = useState(() => clamp(Number(localStorage.getItem('taoclip_libw')) || 290, 200, 480))
   const [inspW, setInspW] = useState(() => clamp(Number(localStorage.getItem('taoclip_inspw')) || 280, 220, 460))
-  const [tlH, setTlH] = useState(() => clamp(Number(localStorage.getItem('taoclip_tlh3')) || clamp(Math.round(window.innerHeight * 0.45), 340, 520), 200, 640))
+  const [tlH, setTlH] = useState(() => clamp(Number(localStorage.getItem('taoclip_tlh4')) || clamp(Math.min(Math.round(window.innerHeight * 0.45), TL_FIT_HEIGHT), 340, 520), 200, 640))
 
   function notify(msg, type = 'ok', action) {
     const id = 'n' + (idRef.current++)
@@ -384,7 +384,7 @@ export default function App() {
   }, [])
   // Nho kich thuoc panel
   useEffect(() => {
-    try { localStorage.setItem('taoclip_libw', libW); localStorage.setItem('taoclip_inspw', inspW); localStorage.setItem('taoclip_tlh3', tlH) } catch {}
+    try { localStorage.setItem('taoclip_libw', libW); localStorage.setItem('taoclip_inspw', inspW); localStorage.setItem('taoclip_tlh4', tlH) } catch {}
   }, [libW, inspW, tlH])
   useEffect(() => { try { localStorage.setItem('taoclip_snap', snapEnabled ? '1' : '0') } catch {} }, [snapEnabled])
   // Meo lan dau mo app: chi hien 1 lan
