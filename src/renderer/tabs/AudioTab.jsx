@@ -20,10 +20,9 @@ function Sec({ id, title, acc, setAcc, children }) {
 export default function AudioTab({
   hasClips, anyAudio, imageCount,
   // slideshow sync
-  syncMode, setSyncMode, bgDur, setSlideDur, setAllSlideDur, fitSlideDuration = 0, fitMusicDuration = 0, hasFitMusic = false, timelineDuration = 0,
+  syncMode, setSyncMode, setSlideDur, setAllSlideDur, fitSlideDuration = 0, fitMusicDuration = 0, hasFitMusic = false, timelineDuration = 0,
   // 2 track
-  music, setMusic, voice, setVoice, musicVol, setMusicVol, voiceVol, setVoiceVol,
-  origVolume, setOrigVolume, bgLoop, setBgLoop, ducking, setDucking, importMusic,
+  origVolume, setOrigVolume, ducking, setDucking, importMusic,
   audioItems = [], addAudioItems, updateAudioItem, removeAudioItem,
   // TTS
   ttsText, setTtsText, ttsBusy, ttsStatus, ttsEngine, setTtsEngine,
@@ -37,8 +36,8 @@ export default function AudioTab({
 }) {
   const { t } = useI18n()
   const [acc, setAcc] = useState({ music: true, tts: true, redub: false, slide: true })
-  const hasMusicTrack = !!music || audioItems.some((item) => item.track === 'music')
-  const hasVoiceTrack = !!voice || audioItems.some((item) => item.track === 'voice')
+  const hasMusicTrack = audioItems.some((item) => item.track === 'music')
+  const hasVoiceTrack = audioItems.some((item) => item.track === 'voice')
   const selectedVoice = ttsVoices.find((v) => v.name === ttsVoice)
   return (
     <div className="cc-cap">
@@ -60,14 +59,6 @@ export default function AudioTab({
 
       <Sec id="music" title={t('audio_music_title')} acc={acc} setAcc={setAcc}>
         <button className="cc-import" onClick={importMusic} disabled={!hasClips}>{t('music_import')}</button>
-        {music && (
-          <div className="bg-box">
-            <div className="bg-name">🎧 {t('bg_added', { name: music.name })}<button className="cap-del" onClick={() => setMusic(null)}><X size={13} /></button></div>
-            <label className="vlbl">{t('vol_music')} <b>{Math.round(musicVol * 100)}%</b></label>
-            <input type="range" min={0} max={1} step={0.05} value={musicVol} onMouseDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => setMusicVol(Number(e.target.value))} />
-            <label className="chk"><input type="checkbox" checked={bgLoop} onChange={(e) => { pushHistory(); setBgLoop(e.target.checked) }} /> {t('bg_loop')}</label>
-          </div>
-        )}
       </Sec>
 
       <Sec id="audio-items" title={t('audio_items_title')} acc={acc} setAcc={setAcc}>
@@ -145,13 +136,6 @@ export default function AudioTab({
             <button className="cc-mini" onClick={refreshLocalTtsModel} disabled={ttsBusy}>{t('check')}</button></div>
           <small className="cap-hint">{t('tts_hint')}</small>
         </div>}
-        {voice && (
-          <div className="bg-box">
-            <div className="bg-name">🎙️ {t('bg_added', { name: voice.name })}<button className="cap-del" onClick={() => setVoice(null)}><X size={13} /></button></div>
-            <label className="vlbl">{t('vol_voice')} <b>{Math.round(voiceVol * 100)}%</b></label>
-            <input type="range" min={0} max={1} step={0.05} value={voiceVol} onMouseDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => setVoiceVol(Number(e.target.value))} />
-          </div>
-        )}
       </Sec>
 
       <Sec id="redub" title={t('redub_title')} acc={acc} setAcc={setAcc}>

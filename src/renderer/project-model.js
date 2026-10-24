@@ -1,8 +1,9 @@
 import { normalizeTracks, assignDefaultTracks, withLayerZIndex } from './track-model.js'
+import { pickTimelineFields, cleanTimelineName, MAX_TIMELINES } from './timelines-model.js'
 import { DEFAULT_TRANSITION_STYLE, TRANSITION_STYLES } from './transition-styles.js'
 import { stickerIdForChar } from './sticker-catalog.js'
 
-const PROJECT_VERSION = 5
+const PROJECT_VERSION = 6
 
 const DEFAULTS = Object.freeze({
   ratio: '9:16',
@@ -19,16 +20,8 @@ const DEFAULTS = Object.freeze({
   transitionDuration: 0.5,
   clips: [],
   assets: [],
-  music: null,
-  voice: null,
-  musicVol: 0.4,
-  voiceVol: 1,
   ducking: true,
-  bgDur: 0,
-  voiceDur: 0,
-  voiceOffset: 0,
   origVolume: 1,
-  bgLoop: true,
   syncMode: 'fit',
   slideDur: 3,
   ttsEngine: 'local',
@@ -122,7 +115,16 @@ function migrateLegacy(data) {
     migrated.projectId ??= defaultId('project', 0)
   }
   if (version < 4) migrated.assets ??= inferLegacyAssets(migrated)
-  if (version < 5) { migrated.audioItems = migrateAudioSlots(migrated); migrated.music = null; migrated.voice = null }
+  if (version < 5) {
+    migrated.audioItems = migrateAudioSlots(migrated)
+    for (const key of ['music', 'voice', 'musicVol', 'voiceVol', 'bgDur', 'voiceDur', 'voiceOffset', 'bgLoop']) delete migrated[key]
+  }
+  // v6: noi dung (clip, track, phu de, thong so) chuyen vao timelines[]; thu vien media va projectId o lai muc du an.
+  if (version < 6) {
+    const content = pickTimelineFields(migrated)
+    for (const key of Object.keys(content)) delete migrated[key]
+    migrated.timelines = [{ name: 'Timeline 1', ...content }]
+  }
   migrated.version = PROJECT_VERSION
   return migrated
 }
@@ -142,22 +144,11 @@ function legacyEmojiToSticker(item) {
   }
 }
 
-export function normalizeProject(input, makeId = defaultId) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('File dự án phải chứa một object JSON.')
-  const migrated = migrateLegacy(input)
-  // Never copy credentials from an imported file into the current project.
-  delete migrated.apiKey
-  delete migrated.googleTtsKey
-  delete migrated.googleTtsKeyEnc
-  const clips = Array.isArray(migrated.clips) ? migrated.clips : DEFAULTS.clips
-  const rawOverlays = Array.isArray(migrated.overlays) ? migrated.overlays : DEFAULTS.overlays
-  // Emoji chu cu co sticker thi chuyen sang V2; emoji khong co sticker va cac overlay khac giu nguyen
-  const legacyStickers = rawOverlays.filter((item) => item?.type === 'emoji' && stickerIdForChar(item.text))
-  const overlays = rawOverlays.filter((item) => !legacyStickers.includes(item))
-  const videoOverlays = [...(Array.isArray(migrated.videoOverlays) ? migrated.videoOverlays : DEFAULTS.videoOverlays), ...legacyStickers.map(legacyEmojiToSticker)]
-  const audioItems = Array.isArray(migrated.audioItems) ? migrated.audioItems : []
-  const captions = Array.isArray(migrated.captions) ? migrated.captions : DEFAULTS.captions
-  const assetSource = Array.isArray(migrated.assets) ? migrated.assets : inferLegacyAssets(migrated, makeId)
+// Thu vien media dung chung cua du an; file cu chua co thi suy ra tu moi timeline.
+function normalizeAssets(migrated, rawTimelines, makeId) {
+  const gather = (key) => rawTimelines.flatMap((timeline) => Array.isArray(timeline?.[key]) ? timeline[key] : [])
+  const assetSource = Array.isArray(migrated.assets) ? migrated.assets
+    : inferLegacyAssets({ clips: gather('clips'), videoOverlays: gather('videoOverlays'), audioItems: gather('audioItems') }, makeId)
   const normalizedAssets = []
   const assetIds = new Set(), assetPaths = new Set()
   for (let index = 0; index < assetSource.length; index++) {
@@ -175,6 +166,19 @@ export function normalizeProject(input, makeId = defaultId) {
       kind, source: ['local', 'download', 'tts', 'ai'].includes(asset.source) ? asset.source : 'local', missing: !!asset.missing,
       metadata: asset.metadata && typeof asset.metadata === 'object' && !Array.isArray(asset.metadata) ? asset.metadata : null })
   }
+  return normalizedAssets
+}
+
+// Chuan hoa noi dung mot timeline (clip, overlay, track, phu de, thong so xuat)
+function normalizeTimeline(migrated, makeId) {
+  const clips = Array.isArray(migrated.clips) ? migrated.clips : DEFAULTS.clips
+  const rawOverlays = Array.isArray(migrated.overlays) ? migrated.overlays : DEFAULTS.overlays
+  // Emoji chu cu co sticker thi chuyen sang V2; emoji khong co sticker va cac overlay khac giu nguyen
+  const legacyStickers = rawOverlays.filter((item) => item?.type === 'emoji' && stickerIdForChar(item.text))
+  const overlays = rawOverlays.filter((item) => !legacyStickers.includes(item))
+  const videoOverlays = [...(Array.isArray(migrated.videoOverlays) ? migrated.videoOverlays : DEFAULTS.videoOverlays), ...legacyStickers.map(legacyEmojiToSticker)]
+  const audioItems = Array.isArray(migrated.audioItems) ? migrated.audioItems : []
+  const captions = Array.isArray(migrated.captions) ? migrated.captions : DEFAULTS.captions
 
   const normalizedClips = clips.map((clip, index) => {
     if (!clip || typeof clip !== 'object' || typeof clip.path !== 'string' || !clip.path.trim()) {
@@ -195,6 +199,8 @@ export function normalizeProject(input, makeId = defaultId) {
       speed: kind === 'image' ? 1 : speed,
       cropMode,
       audioDetached: kind === 'video' && !!clip.audioDetached,
+      audioMuted: kind === 'video' && !!clip.audioMuted,
+      enhance: !!clip.enhance,
       cropX: finite(clip.cropX ?? 0.5, `clips[${index}].cropX`, { min: 0, max: 1 }),
       cropY: finite(clip.cropY ?? 0.5, `clips[${index}].cropY`, { min: 0, max: 1 }),
       name: typeof clip.name === 'string' && clip.name ? clip.name : clip.path.split(/[\\/]/).pop(),
@@ -328,16 +334,13 @@ export function normalizeProject(input, makeId = defaultId) {
   const tracks = normalizeTracks(assigned.tracks, [...assigned.videoItems, ...assigned.audioItems].map((item) => item.trackId))
 
   return {
-    ...DEFAULTS,
-    ...migrated,
-    version: PROJECT_VERSION,
-    projectId: migrated.projectId || makeId('project', 0),
+    ...pickTimelineFields(DEFAULTS),
+    ...pickTimelineFields(migrated),
     ratio,
     filterIntensity,
     transitionStyle,
     transitionDuration,
     clips: normalizedClips,
-    assets: normalizedAssets,
     overlays: normalizedOverlays,
     tracks,
     videoOverlays: withLayerZIndex(assigned.videoItems, tracks),
@@ -347,10 +350,46 @@ export function normalizeProject(input, makeId = defaultId) {
     keepSegments,
     silenceParams,
     autoCut: !!migrated.autoCut,
-    autoInfo,
-    music: migrated.music ?? null,
-    voice: migrated.voice ?? null
+    autoInfo
   }
+}
+
+export function normalizeProject(input, makeId = defaultId) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('File dự án phải chứa một object JSON.')
+  const migrated = migrateLegacy(input)
+  // Never copy credentials from an imported file into the current project.
+  delete migrated.apiKey
+  delete migrated.googleTtsKey
+  delete migrated.googleTtsKeyEnc
+  const rawTimelines = Array.isArray(migrated.timelines) && migrated.timelines.length ? migrated.timelines : [{}]
+  if (rawTimelines.length > MAX_TIMELINES) throw new Error(`Project không hợp lệ: tối đa ${MAX_TIMELINES} timeline`)
+  rawTimelines.forEach((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Project không hợp lệ: timelines[${index}]`)
+  })
+  const assets = normalizeAssets(migrated, rawTimelines, makeId)
+  const content = rawTimelines.map((raw) => normalizeTimeline(raw, makeId))
+  const projectId = migrated.projectId || makeId('project', 0)
+  // Id timeline duoc cap sau cung de khong doi id cua cac thuc the khac
+  const ids = new Set()
+  const timelines = rawTimelines.map((raw, index) => {
+    const id = typeof raw.id === 'string' && raw.id ? raw.id : makeId('timeline', index)
+    if (ids.has(id)) throw new Error(`Project có timeline trùng ID: ${id}`)
+    ids.add(id)
+    return { id, name: cleanTimelineName(raw.name, `Timeline ${index + 1}`), ...content[index] }
+  })
+  return {
+    ...migrated,
+    version: PROJECT_VERSION,
+    projectId,
+    assets,
+    activeTimelineId: ids.has(migrated.activeTimelineId) ? migrated.activeTimelineId : timelines[0].id,
+    timelines
+  }
+}
+
+// Timeline dang mo (hoac timeline dau tien) cua mot du an da chuan hoa
+export function activeTimeline(project) {
+  return project.timelines.find((timeline) => timeline.id === project.activeTimelineId) || project.timelines[0]
 }
 
 export { PROJECT_VERSION }

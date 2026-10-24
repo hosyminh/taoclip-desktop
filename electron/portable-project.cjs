@@ -6,10 +6,12 @@ const projectStore = require('./project-store.cjs')
 function cloneProject(project) { return JSON.parse(JSON.stringify(project)) }
 
 function forEachAsset(project, visit) {
-  for (const clip of project.clips || []) visit(clip, 'clip')
+  for (const scope of [project, ...(Array.isArray(project.timelines) ? project.timelines : [])]) {
+    for (const clip of scope.clips || []) visit(clip, 'clip')
+    for (const item of scope.videoOverlays || []) if (!item?.sticker) visit(item, 'video overlay')
+    for (const item of scope.audioItems || []) visit(item, 'audio item')
+  }
   for (const asset of project.assets || []) visit(asset, 'library asset')
-  for (const item of project.videoOverlays || []) if (!item?.sticker) visit(item, 'video overlay')
-  for (const item of project.audioItems || []) visit(item, 'audio item')
   if (project.music?.path) visit(project.music, 'music')
   if (project.voice?.path) visit(project.voice, 'voice')
 }

@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getEntitlements } from './entitlements.js'
 import { useI18n } from './i18n.jsx'
 import {
   Film, Play, Pause, SkipBack, SkipForward, ChevronLeft, ChevronRight, Repeat, Volume2, VolumeX,
-  Undo2, Redo2, Upload, Scissors, Minus, Plus, Music, X, Keyboard, Image, FolderUp, Mic
+  Upload, Scissors, Image, FolderUp, Copy, CopyPlus, ClipboardPaste, Frame, Sparkles, AudioLines, AudioWaveform, Captions, Lock, Unlock, Trash2, Pencil
 } from 'lucide-react'
 import {
   fmt, fileUrl, clamp, FRAME, isImg, clipOut, FILTERS, filterPreviewCss, TABS
@@ -15,6 +15,14 @@ import AudioTab from './tabs/AudioTab.jsx'
 import FilterTab from './tabs/FilterTab.jsx'
 import StickerTab from './tabs/StickerTab.jsx'
 import TransTab from './tabs/TransTab.jsx'
+import Timeline from './timeline/Timeline.jsx'
+import ContextMenu from './timeline/ContextMenu.jsx'
+import { MIN_PIECE, FREEZE_SECONDS, splitTimelineItem, insertFreezeFrame, duplicateClipAfter, mergeClipCaptions, splitAnchoredCaptions } from './timeline/clip-commands.js'
+import { clientXToTime as geometryClientXToTime, ASSET_DRAG_TYPE, HEAD_W, ZOOM_STEP, clampPps, fitPps, tickStep } from './timeline/geometry.js'
+import {
+  defaultTracks, normalizeTracks, makeTrack, nextTrackNumber, choosePlacement, itemSpan, clipAudioSpans, layerIndex, withLayerZIndex,
+  audibleTrackIds, visibleVideoTrackIds, insertIndexForTime, buildDetachedAudioItem, isCoreTrack, MAIN_VIDEO_TRACK, MAIN_AUDIO_TRACK
+} from './track-model.js'
 import { DEFAULT_TRANSITION_STYLE } from './transition-styles.js'
 import { stickerChar } from './sticker-catalog.js'
 import Inspector from './Inspector.jsx'
@@ -26,6 +34,10 @@ import RecoveryBanner from './RecoveryBanner.jsx'
 import VideoOverlayPreview from './VideoOverlayPreview.jsx'
 import AudioItemPreview from './AudioItemPreview.jsx'
 import { normalizeProject } from './project-model.js'
+import {
+  MAX_TIMELINES, nextTimelineName, copyTimelineName, cleanTimelineName, activeAfterRemove, moveTimeline, libraryAfterRestore, approxTimelineDuration
+} from './timelines-model.js'
+import TimelineTabs from './timeline/TimelineTabs.jsx'
 import { buildTimelinePlan, fitImageDurationToTarget, mapSourceRange, mapTimelineTime, mapTimelineRangeToSources, resolvePreviewSource, toExportSegments, snapToFrameTime } from './timeline-plan.js'
 import { snapshotHistoryClips, restoreHistoryClips, historySnapshotsEqual, restoreHistorySelection } from './history-model.js'
 import { createAsyncResourceGuard } from './async-resource-guard.js'
@@ -36,6 +48,9 @@ function makeEntityId(kind) {
   const value = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`
   return `${kind}_${value}`
 }
+
+// Doi tab timeline khong phai la sua du an: bo tab dang mo khoi khoa so sanh "da thay doi chua luu"
+const projectKey = (project) => JSON.stringify({ ...project, activeTimelineId: null })
 
 export default function App() {
   const { t } = useI18n()
@@ -58,8 +73,6 @@ export default function App() {
   const resumePlayRequestedRef = useRef(false)
   const frameRef = useRef(null)
   const curRef = useRef(0) // guong cua `current` cho vong phat anh (RAF)
-  const musicRef = useRef(null) // <audio> nghe thu nhac trong preview
-  const voiceRef = useRef(null) // <audio> nghe thu long tieng trong preview
   const [frameH, setFrameH] = useState(0)
 
   const [tab, setTab] = useState('media')
@@ -92,6 +105,20 @@ export default function App() {
   const [exactFilterBusy, setExactFilterBusy] = useState(false)
   const [mode, setMode] = useState('smart')
   const [pps, setPps] = useState(80)
+  // Khung hinh thu nho cho video tren V2+ (khoa theo duong dan; dung chung neu nhieu item cung nguon)
+  const [overlayThumbs, setOverlayThumbs] = useState({})
+  const overlayThumbRequests = useRef(new Set())
+  const [laneDrag, setLaneDrag] = useState(null) // { trackId, time }: duong dich + thoi diem khi keo clip / item sang duong khac
+  const ppsRef = useRef(pps)
+  ppsRef.current = pps
+  const zoomAnchorRef = useRef(null) // diem thoi gian giu yen khi doi muc thu phong: { time, x (px trong khung cuon) }
+  // Sau khi doi pps: cuon lai de diem neo (con tro / tam man hinh / dau timeline) nam dung cho cu
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current
+    zoomAnchorRef.current = null
+    const el = scrollRef.current
+    if (anchor && el) el.scrollLeft = Math.max(0, HEAD_W + anchor.time * pps - anchor.x)
+  }, [pps])
   const [snapEnabled, setSnapEnabled] = useState(() => localStorage.getItem('taoclip_snap') !== '0')
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
@@ -109,27 +136,24 @@ export default function App() {
   const [autoInfo, setAutoInfo] = useState(null)
   const [silenceParams, setSilenceParams] = useState({ threshold: -30, minSilence: 0.4, pad: 0.06 })
   const [busy, setBusy] = useState(false)
-  // am thanh them: 2 track DOC LAP (nhac nen + long tieng), tron cung luc khi xuat
-  const [music, setMusic] = useState(null) // {path,name}
-  const [voice, setVoice] = useState(null) // {path,name}
-  const musicWavePathRef = useRef(null)
-  const voiceWavePathRef = useRef(null)
-  musicWavePathRef.current = music?.path || null
-  voiceWavePathRef.current = voice?.path || null
+  // am thanh them: cac doan audio (nhac / giong / tieng goc da tach) tren cac track, tron cung luc khi xuat
   const [videoOverlays, setVideoOverlays] = useState([])
   const [audioItems, setAudioItems] = useState([])
-  const [musicWave, setMusicWave] = useState(null) // anh waveform cua nhac
-  const [voiceWave, setVoiceWave] = useState(null) // anh waveform cua giong
-  const [musicVol, setMusicVol] = useState(0.4)
-  const [voiceVol, setVoiceVol] = useState(1)
   const [ducking, setDucking] = useState(true) // tu ha nhac khi co giong
-  const [bgDur, setBgDur] = useState(0) // thoi luong nhac (de chia deu slideshow)
-  const [voiceDur, setVoiceDur] = useState(0)
-  const [voiceOffset, setVoiceOffset] = useState(0) // giay bat dau long tieng tren timeline
   const [syncMode, setSyncMode] = useState('fit') // fit = chia deu theo nhac | fixed = co dinh moi anh
   const [slideDur, setSlideDur] = useState(3) // thoi luong mac dinh moi anh (che do fixed)
   const [origVolume, setOrigVolume] = useState(1)
-  const [bgLoop, setBgLoop] = useState(true)
+  const [tracks, setTracks] = useState(() => defaultTracks())
+  const [selItem, setSelItem] = useState(null) // {kind: 'v2' | 'audio', id}
+  const [ctxMenu, setCtxMenu] = useState(null) // {x, y, target: {kind: 'clip' | 'v2' | 'audio', id}}
+  const [clipboard, setClipboard] = useState(null) // {kind, data}: ban sao clip / item de dan tai dau phat
+  // Ban sao moi nhat cua tracks + item phu + audio: tranh doc state cu sau cac await (nhap media...)
+  const timelineStateRef = useRef({ tracks, videoOverlays, audioItems })
+  timelineStateRef.current = { tracks, videoOverlays, audioItems }
+  const visibleVideoIds = useMemo(() => visibleVideoTrackIds(tracks), [tracks])
+  const audibleIds = useMemo(() => audibleTrackIds(tracks), [tracks])
+  // A1 la track tieng goc cua clip V1: tat tieng / solo track khac se tat luon tieng goc
+  const effOrigVolume = audibleIds.has(MAIN_AUDIO_TRACK) ? origVolume : 0
   const [ttsText, setTtsText] = useState('')
   const ttsTextRef = useRef(ttsText)
   ttsTextRef.current = ttsText
@@ -194,6 +218,12 @@ export default function App() {
   // lich su (snapshot clips)
   const [hist, setHist] = useState([])
   const [future, setFuture] = useState([])
+  // Nhieu timeline trong mot du an: timeline dang mo song trong cac state o tren; tab con lai giu snapshot + lich su rieng
+  const firstTimelineRef = useRef(null)
+  if (!firstTimelineRef.current) firstTimelineRef.current = { id: makeEntityId('timeline'), name: 'Timeline 1', snap: null, hist: [], future: [] }
+  const [timelines, setTimelines] = useState(() => [firstTimelineRef.current])
+  const [activeTimelineId, setActiveTimelineId] = useState(firstTimelineRef.current.id)
+  const [renamingTabId, setRenamingTabId] = useState(null)
   const [projectPath, setProjectPath] = useState('')
   const [collectingProject, setCollectingProject] = useState(false)
   const collectingProjectRef = useRef(false)
@@ -212,7 +242,7 @@ export default function App() {
   // keo gian panel (nho kich thuoc)
   const [libW, setLibW] = useState(() => clamp(Number(localStorage.getItem('taoclip_libw')) || 290, 200, 480))
   const [inspW, setInspW] = useState(() => clamp(Number(localStorage.getItem('taoclip_inspw')) || 280, 220, 460))
-  const [tlH, setTlH] = useState(() => clamp(Number(localStorage.getItem('taoclip_tlh')) || 280, 160, 480))
+  const [tlH, setTlH] = useState(() => clamp(Number(localStorage.getItem('taoclip_tlh3')) || clamp(Math.round(window.innerHeight * 0.45), 340, 520), 200, 640))
 
   function notify(msg, type = 'ok', action) {
     const id = 'n' + (idRef.current++)
@@ -228,7 +258,7 @@ export default function App() {
     const move = (ev) => {
       if (kind === 'lib') setLibW(clamp(l0 + (ev.clientX - sx), 200, 480))
       else if (kind === 'insp') setInspW(clamp(i0 - (ev.clientX - sx), 220, 460))
-      else setTlH(clamp(t0 - (ev.clientY - sy), 160, 480))
+      else setTlH(clamp(t0 - (ev.clientY - sy), 200, 640))
     }
     const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up) }
     attachDocumentMouseDrag(move, up)
@@ -251,6 +281,9 @@ export default function App() {
   const totalDuration = timelinePlan.duration
   const activeClip = clips[activeIdx] || null
   const activeIsImage = isImg(activeClip)
+  // Clip dang xem co tieng rieng duoc tach / tat -> phan tieng cua the <video> phai im (tieng tach phat qua audio item)
+  const clipSilent = !!(activeClip?.audioDetached || activeClip?.audioMuted)
+  const mainFilterCss = activeClip?.enhance ? `${filter.css === 'none' ? '' : filter.css + ' '}contrast(1.05) saturate(1.1)` : filter.css
   const previewCropStyle = activeClip?.cropMode === 'fill' || (activeIsImage && activeClip?.kenBurns !== false)
     ? { objectFit: 'cover', objectPosition: `${(activeClip.cropX ?? 0.5) * 100}% ${(activeClip.cropY ?? 0.5) * 100}%` }
     : { objectFit: 'contain', objectPosition: '50% 50%' }
@@ -298,9 +331,9 @@ export default function App() {
   const mainPreviewOpacity = mainPreviewWeight * fadePreviewOpacity
   const imageCount = useMemo(() => clips.filter(isImg).length, [clips])
   const fitSlideDuration = useMemo(() => clips.find(isImg)?.out ?? slideDur, [clips, slideDur])
-  const fitMusicDuration = useMemo(() => Math.max(bgDur, ...audioItems.filter((item) => item.track === 'music' && !item.muted)
-    .map((item) => Math.max(0, Number(item.start) || 0) + Math.max(0, (Number(item.out) || 0) - (Number(item.in) || 0)))), [bgDur, audioItems])
-  const hasFitMusic = !!music || audioItems.some((item) => item.track === 'music' && !item.muted)
+  const fitMusicDuration = useMemo(() => Math.max(0, ...audioItems.filter((item) => item.track === 'music' && !item.muted)
+    .map((item) => Math.max(0, Number(item.start) || 0) + Math.max(0, (Number(item.out) || 0) - (Number(item.in) || 0)) / (Number(item.speed) > 0 ? Number(item.speed) : 1))), [audioItems])
+  const hasFitMusic = audioItems.some((item) => item.track === 'music' && !item.muted)
 
   useEffect(() => window.taoclip.onExportProgress((payload) => {
     const batch = activeExportBatchRef.current
@@ -337,7 +370,7 @@ export default function App() {
   }, [])
   // Nho kich thuoc panel
   useEffect(() => {
-    try { localStorage.setItem('taoclip_libw', libW); localStorage.setItem('taoclip_inspw', inspW); localStorage.setItem('taoclip_tlh', tlH) } catch {}
+    try { localStorage.setItem('taoclip_libw', libW); localStorage.setItem('taoclip_inspw', inspW); localStorage.setItem('taoclip_tlh3', tlH) } catch {}
   }, [libW, inspW, tlH])
   useEffect(() => { try { localStorage.setItem('taoclip_snap', snapEnabled ? '1' : '0') } catch {} }, [snapEnabled])
   // Meo lan dau mo app: chi hien 1 lan
@@ -349,12 +382,23 @@ export default function App() {
       }
     } catch {}
   }, [])
+  // Nap khung hinh thu nho cho video tren V2+ (mot lan moi file; loi thi cho phep thu lai o lan doi sau)
+  useEffect(() => {
+    for (const item of videoOverlays) {
+      const mediaPath = item.path
+      if (item.kind !== 'video' || item.sticker || item.missing || !mediaPath || overlayThumbRequests.current.has(mediaPath)) continue
+      overlayThumbRequests.current.add(mediaPath)
+      window.taoclip.thumbnails(mediaPath, 8)
+        .then((thumbs) => setOverlayThumbs((map) => ({ ...map, [mediaPath]: thumbs?.length ? thumbs : [] })))
+        .catch(() => { overlayThumbRequests.current.delete(mediaPath) })
+    }
+  }, [videoOverlays])
   // Tu luu (debounce 1.2s) khi du an thay doi
   useEffect(() => {
     clearTimeout(autosaveRef.current)
     autosaveRef.current = setTimeout(() => { window.taoclip.writeRecovery?.(buildProject()).catch(() => {}) }, 1200)
     return () => clearTimeout(autosaveRef.current)
-  }, [clips, ratio, filterKey, filterIntensity, mode, captions, overlays, videoOverlays, audioItems, music, voice, musicVol, voiceVol, ducking, origVolume, bgLoop, transition, transitionDuration, burnCaptions, syncMode, slideDur, bgDur, voiceDur, voiceOffset, keepSegments, autoCut, autoInfo, aiEdited, ttsEngine, ttsVoice, ttsRate, ttsPitch, silenceParams])
+  }, [clips, ratio, filterKey, filterIntensity, mode, captions, overlays, videoOverlays, audioItems, tracks, ducking, origVolume, transition, transitionDuration, burnCaptions, syncMode, slideDur, keepSegments, autoCut, autoInfo, aiEdited, ttsEngine, ttsVoice, ttsRate, ttsPitch, silenceParams, timelines, activeTimelineId, libraryAssets])
   useEffect(() => {
     const ids = new Set(clips.map((clip) => clip.id))
     asyncResourceGuardRef.current.prune((key) => {
@@ -368,8 +412,8 @@ export default function App() {
   }, [selId, clips])
   useEffect(() => {
     const video = videoRef.current
-    if (video) { video.volume = volume * origVolume * mainPreviewOpacity; video.muted = muted }
-  }, [volume, muted, origVolume, activeIdx, mainPreviewOpacity])
+    if (video) { video.volume = volume * effOrigVolume * mainPreviewOpacity; video.muted = muted || clipSilent }
+  }, [volume, muted, clipSilent, effOrigVolume, activeIdx, mainPreviewOpacity])
   useEffect(() => {
     const video = overlapVideoRef.current
     if (!video || !overlapPreview) return
@@ -377,15 +421,16 @@ export default function App() {
     const otherClip = activeClip?.id === overlapPreview.incoming.clipId ? overlapPreview.outgoingClip : overlapPreview.incomingClip
     if (!otherClip || otherClip.missing || isImg(otherClip)) { video.pause(); return }
     video.playbackRate = otherClip.speed || 1
-    video.volume = volume * origVolume * (1 - mainPreviewWeight)
-    video.muted = muted || !otherClip.src?.hasAudio
+    video.volume = volume * effOrigVolume * (1 - mainPreviewWeight)
+    video.muted = muted || !otherClip.src?.hasAudio || !!otherClip.audioDetached || !!otherClip.audioMuted
     if (Number.isFinite(video.duration) && video.duration > 0 && Math.abs(video.currentTime - other.sourceTime) > 0.12) {
       try { video.currentTime = clamp(other.sourceTime, 0, Math.max(0, video.duration - 0.02)) } catch {}
     }
     if (playing) video.play().catch(() => {})
     else video.pause()
-  }, [overlapPreview, activeClip, mainPreviewWeight, volume, muted, origVolume, playing])
+  }, [overlapPreview, activeClip, mainPreviewWeight, volume, muted, effOrigVolume, playing])
   // Giu activeIdx & current trong pham vi hop le khi xoa/doi thu tu/cat clip
+  useEffect(() => { if (selOv) setSelItem(null) }, [selOv])
   useEffect(() => { if (activeIdx > clips.length - 1) setActiveIdx(Math.max(0, clips.length - 1)) }, [clips.length, activeIdx])
   useEffect(() => { if (current > totalDuration) setCurrent(totalDuration) }, [totalDuration, current])
   useEffect(() => { curRef.current = current }, [current])
@@ -418,11 +463,7 @@ export default function App() {
       else pendingSeekRef.current = srcTime
     }
     curRef.current = gt; setCurrent(gt)
-    const a = musicRef.current
-    if (a && bgDur) { try { a.currentTime = bgLoop ? gt % bgDur : Math.min(gt, bgDur) } catch (e) {} }
-    const vv = voiceRef.current
-    if (vv) { try { vv.currentTime = clamp(gt - voiceOffset, 0, vv.duration || voiceDur || 0) } catch (e) {} }
-  }, [timelinePlan, totalDuration, clips, activeIdx, bgDur, bgLoop, voiceDur, voiceOffset])
+  }, [timelinePlan, totalDuration, clips, activeIdx])
 
   // ---- Vong phat cho ANH (khong co <video> lam dong ho) ----
   useEffect(() => {
@@ -451,31 +492,20 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [playing, activeIsImage, activeIdx, layout, clips, loop, totalDuration, timelinePlan, seekGlobal, previewLoading, previewError])
 
-  // ---- Nghe thu nhac nen trong preview (dong bo tho theo playhead) ----
-  useEffect(() => {
-    const a = musicRef.current
-    if (a) { a.volume = musicVol; if (playing) a.play().catch(() => {}); else a.pause() }
-  }, [playing, music, musicVol])
-  // ---- Nghe thu long tieng: chi phat khi playhead vao vung [voiceOffset, voiceOffset+dur] ----
-  useEffect(() => {
-    const v = voiceRef.current; if (!v || !voice) return
-    v.volume = voiceVol
-    const local = current - voiceOffset
-    const dur = v.duration || voiceDur || 0
-    if (playing && local >= -0.05 && local < dur - 0.05) {
-      if (v.paused) { try { if (Math.abs(v.currentTime - local) > 0.35) v.currentTime = Math.max(0, local) } catch (e) {}; v.play().catch(() => {}) }
-    } else if (!v.paused) v.pause()
-  }, [current, playing, voice, voiceVol, voiceOffset, voiceDur])
-
   // ---- Lich su (snapshot toan bo noi dung du an: clips + overlay + phu de + audio) ----
   function snapshot() {
     return {
       selectedClipId: selId, selectedOverlayId: selOv, activeClipId: clips[activeIdx]?.id || null, activeClipIndex: activeIdx,
-      clips: snapshotHistoryClips(clips), libraryAssets, overlays, videoOverlays, audioItems, captions, captionTimebase, music, voice, bgDur, voiceDur, voiceOffset,
+      clips: snapshotHistoryClips(clips), libraryAssets, overlays, videoOverlays, audioItems, tracks, captions, captionTimebase,
       ratio, filterKey, filterIntensity, mode, transition, transitionStyle, transitionDuration, burnCaptions,
-      musicVol, voiceVol, origVolume, ducking, bgLoop, syncMode, slideDur,
+      origVolume, ducking, syncMode, slideDur,
       ttsEngine, ttsVoice, ttsRate, ttsPitch, keepSegments, autoCut, autoInfo, aiEdited, silenceParams
     }
+  }
+  // Thu vien media dung chung nhieu timeline: hoan tac o tab nay khong duoc lam mat media tab khac dang dung
+  function restoredLibrary(restoredAssets) {
+    const others = timelines.filter((entry) => entry.id !== activeTimelineId && entry.snap).map((entry) => entry.snap)
+    return libraryAfterRestore(restoredAssets, libraryAssetsRef.current, others)
   }
   function snapshotsEqual(a, b) {
     return historySnapshotsEqual(a, b)
@@ -505,22 +535,17 @@ export default function App() {
     const restoredClips = restoreHistoryClips(s.clips, clips)
     const restoredSelection = restoreHistorySelection(s, restoredClips, s.overlays || [], activeIdx)
     setClips(restoredClips)
-    setLibraryAssets(s.libraryAssets || [])
+    setLibraryAssets(restoredLibrary(s.libraryAssets))
     setSelId(restoredSelection.selectedClipId); setSelOv(restoredSelection.selectedOverlayId); setActiveIdx(restoredSelection.activeClipIndex)
     restoredClips.forEach((clip) => {
       if (clip.kind !== 'image' && !clip.missing && !clip.thumbs?.length) loadThumbnails(clip.id, clip.path)
       if (clip.kind !== 'image' && !clip.missing && clip.src?.hasAudio && !clip.wave) loadWave(clip.id, clip.path, true)
     })
-    setOverlays(s.overlays || []); setVideoOverlays(s.videoOverlays || []); setAudioItems(s.audioItems || []); setCaptions(s.captions || []); setCaptionTimebase(s.captionTimebase || 'timeline')
-    commitMusic(s.music ?? null); commitVoice(s.voice ?? null)
-    setMusicWave(null); setVoiceWave(null)
-    if (s.music?.path) loadTrackWave('music', s.music.path)
-    if (s.voice?.path) loadTrackWave('voice', s.voice.path)
-    setBgDur(s.bgDur ?? 0); setVoiceDur(s.voiceDur ?? 0); setVoiceOffset(s.voiceOffset ?? 0)
+    setOverlays(s.overlays || []); setVideoOverlays(s.videoOverlays || []); setAudioItems(s.audioItems || []); setTracks(normalizeTracks(s.tracks)); setSelItem(null); setCaptions(s.captions || []); setCaptionTimebase(s.captionTimebase || 'timeline')
     setRatio(s.ratio || '9:16'); setFilterKey(s.filterKey || 'none'); setFilterIntensity(s.filterIntensity ?? 100); setMode(s.mode || 'smart')
     setTransition(s.transition || 'none'); setTransitionStyle(s.transitionStyle || DEFAULT_TRANSITION_STYLE); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
-    setMusicVol(s.musicVol ?? 0.4); setVoiceVol(s.voiceVol ?? 1); setOrigVolume(s.origVolume ?? 1)
-    setDucking(s.ducking !== false); setBgLoop(s.bgLoop !== false); setSyncMode(s.syncMode || 'fit'); setSlideDur(s.slideDur ?? 3)
+    setOrigVolume(s.origVolume ?? 1)
+    setDucking(s.ducking !== false); setSyncMode(s.syncMode || 'fit'); setSlideDur(s.slideDur ?? 3)
     setTtsEngine(s.ttsEngine || 'local'); setTtsVoice(s.ttsVoice || ''); setTtsRate(s.ttsRate ?? 1); setTtsPitch(s.ttsPitch ?? 0)
     setKeepSegments(s.keepSegments ?? null); setAutoCut(!!s.autoCut); setAutoInfo(s.autoInfo ?? null); setAiEdited(!!s.aiEdited)
     setSilenceParams(s.silenceParams || (s.autoInfo?.options ? {
@@ -575,6 +600,7 @@ export default function App() {
   function changeSyncMode(value) { if (value !== syncMode) { pushHistory(); setSyncMode(value) } }
   function changeAutoCut(value) {
     if (value === autoCut) return
+    if (value && (clips[0]?.audioDetached || clips[0]?.audioMuted)) { setStatus(t('msg_autocut_blocked_detached')); return }
     pushHistory(); setAutoCut(value)
     setCaptions((items) => remapAnchoredCaptions(clips, items, transition, value, keepSegments))
   }
@@ -616,7 +642,8 @@ export default function App() {
     importBusyRef.current = true; cancelImportRef.current = false
     setImporting(true); setImportReport([])
     const built = [], libraryAdditions = [], failures = [], seen = new Set(clips.map((clip) => normalizeMediaPath(clip.path)))
-    let musicCandidate = null, duplicates = 0
+    const audioFound = []
+    let duplicates = 0
     const inputs = [...new Set((paths || []).filter(Boolean))]
     try {
       for (let i = 0; i < inputs.length; i++) {
@@ -627,7 +654,7 @@ export default function App() {
         if (cancelImportRef.current) break
         const p = inputs[i], key = normalizeMediaPath(p), name = p.split(/[\\/]/).pop()
         setImportProgress(`${i + 1}/${inputs.length} · ${name}`)
-        if (seen.has(key) || (music?.path && normalizeMediaPath(music.path) === key)) {
+        if (seen.has(key)) {
           duplicates++; failures.push({ path: name, reason: t('msg_already_in_project') }); continue
         }
         seen.add(key)
@@ -639,19 +666,13 @@ export default function App() {
           }
           if (!allowedKinds.includes(media.kind)) throw new Error(media.kind === 'audio' ? t('msg_audio_unsupported_here') : t('msg_media_kind_mismatch'))
           if (media.kind === 'audio') {
-            if (!musicCandidate) { musicCandidate = { path: p, name }; libraryAdditions.push(makeLibraryAsset(p, 'audio', media)) }
-            else failures.push({ path: name, reason: t('msg_one_music_only') })
+            audioFound.push({ path: p, name, media }); libraryAdditions.push(makeLibraryAsset(p, 'audio', media))
           } else if (media.kind === 'image') {
             libraryAdditions.push(makeLibraryAsset(p, 'image', media))
-            built.push({ id: makeEntityId('clip'), kind: 'image', path: p, name,
-              animated: media.formatName === 'gif',
-              src: { duration: media.duration || slideDur, width: media.width, height: media.height,
-                hasAudio: false, isImage: true, rotation: media.rotation || 0 },
-              in: 0, out: slideDur, speed: 1, kenBurns: true, thumbs: [p] })
+            built.push(makeClipFromMedia(p, name, media))
           } else {
             libraryAdditions.push(makeLibraryAsset(p, 'video', media))
-            built.push({ id: makeEntityId('clip'), path: p, name, src: media, in: 0,
-              out: media.duration, speed: 1, thumbs: [] })
+            built.push(makeClipFromMedia(p, name, media))
           }
         } catch (error) { failures.push({ path: name, reason: String(error.message || error).slice(0, 240) }) }
       }
@@ -659,7 +680,7 @@ export default function App() {
         setStatus(t('msg_project_changed_import'))
         return { added: 0, stale: true }
       }
-      if (built.length || musicCandidate) {
+      if (built.length || audioFound.length) {
         pushHistory()
         addLibraryAssets(libraryAdditions)
         if (built.length) {
@@ -670,28 +691,29 @@ export default function App() {
             loadWave(clip.id, clip.path, clip.src.hasAudio)
           })
         }
-        if (musicCandidate) {
-          const musicDurationTicket = asyncResourceGuardRef.current.begin('track:music:duration', musicCandidate.path, importScope)
-          commitMusic(musicCandidate); setBgLoop(true); setMusicVol(0.4); setMusicWave(null)
-          loadTrackWave('music', musicCandidate.path)
-          try {
-            const metadata = await window.taoclip.probe(musicCandidate.path)
-            if (asyncResourceGuardRef.current.isCurrent(musicDurationTicket, musicWavePathRef.current, resourceScopeRef.current)) setBgDur(metadata.duration || 0)
-          } catch {
-            if (asyncResourceGuardRef.current.isCurrent(musicDurationTicket, musicWavePathRef.current, resourceScopeRef.current)) setBgDur(0)
-          }
+        if (audioFound.length) {
+          appendAudioItems(audioFound.map((found) => makeAudioItem({ path: found.path, name: found.name, role: 'music', start: 0, duration: found.media.duration })))
         }
       }
       const result = [...built.map((item) => ({ path: item.name, ok: true })),
-        ...(musicCandidate ? [{ path: musicCandidate.name, ok: true }] : []), ...failures]
+        ...audioFound.map((found) => ({ path: found.name, ok: true })), ...failures]
       setImportReport(result)
       const cancelled = cancelImportRef.current && built.length < inputs.length
-      setStatus(t('msg_import_summary', { n: built.length + (musicCandidate ? 1 : 0), f: failures.length }) + (cancelled ? ` · ${t('msg_cancelled_suffix')}` : '') + (duplicates ? ` · ${t('msg_dup_suffix', { n: duplicates })}` : ''))
-      return { added: built.length + (musicCandidate ? 1 : 0), failed: failures.length, cancelled }
+      setStatus(t('msg_import_summary', { n: built.length + audioFound.length, f: failures.length }) + (cancelled ? ` · ${t('msg_cancelled_suffix')}` : '') + (duplicates ? ` · ${t('msg_dup_suffix', { n: duplicates })}` : ''))
+      return { added: built.length + audioFound.length, failed: failures.length, cancelled }
     } finally {
       importBusyRef.current = false; cancelImportRef.current = false
       setImporting(false); setImportProgress('')
     }
+  }
+  // Clip V1 moi tu thong tin media (anh: thoi luong = slideDur, ken burns; video: toan bo file)
+  function makeClipFromMedia(mediaPath, name, media) {
+    if (media.kind === 'image') {
+      return { id: makeEntityId('clip'), kind: 'image', path: mediaPath, name, animated: media.formatName === 'gif',
+        src: { duration: media.duration || slideDur, width: media.width, height: media.height, hasAudio: false, isImage: true, rotation: media.rotation || 0 },
+        in: 0, out: slideDur, speed: 1, kenBurns: true, thumbs: [mediaPath] }
+    }
+    return { id: makeEntityId('clip'), path: mediaPath, name, src: media, in: 0, out: media.duration, speed: 1, thumbs: [] }
   }
   function normalizeMediaPath(value) { return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() }
   function makeLibraryAsset(mediaPath, kind, metadata = null, source = 'local') {
@@ -737,22 +759,14 @@ export default function App() {
     }).catch(() => setClips((items) => items.map((item) => item.id === id && item.path === p && asyncResourceGuardRef.current.isCurrent(ticket, item.path, resourceScopeRef.current)
       ? { ...item, waveLoading: false, waveError: true } : item)))
   }
-  function commitMusic(value) { musicWavePathRef.current = value?.path || null; setMusic(value) }
-  function commitVoice(value) { voiceWavePathRef.current = value?.path || null; setVoice(value) }
-  function loadTrackWave(track, mediaPath) {
-    if (!mediaPath || !window.taoclip.waveform) return
-    const key = `track:${track}:waveform`
-    const ticket = asyncResourceGuardRef.current.begin(key, mediaPath, resourceScopeRef.current)
-    window.taoclip.waveform(mediaPath).then((wave) => {
-      if (!asyncResourceGuardRef.current.isCurrent(ticket, track === 'music' ? musicWavePathRef.current : voiceWavePathRef.current, resourceScopeRef.current)) return
-      if (track === 'music') setMusicWave(wave || null)
-      else setVoiceWave(wave || null)
-    }).catch(() => {
-      if (!asyncResourceGuardRef.current.isCurrent(ticket, track === 'music' ? musicWavePathRef.current : voiceWavePathRef.current, resourceScopeRef.current)) return
-      if (track === 'music') setMusicWave(null)
-      else setVoiceWave(null)
-    })
+  // ---- Audio item: moi doan nhac / giong / tieng goc da tach la mot item tren track ----
+  function makeAudioItem({ path: audioPath, name, role = 'music', start = 0, duration, sourceDuration = duration, gain, loop, source = 'local', speed = 1, extra = {} }) {
+    const length = Math.max(0.001, Number(duration) || 0.001)
+    return { id: makeEntityId('audio'), path: audioPath, name: name || audioPath.split(/[\\/]/).pop(), track: role, start, in: 0, out: length,
+      sourceDuration: Number(sourceDuration) || length, speed, gain: gain ?? (role === 'music' ? 0.4 : 1), fadeIn: 0, fadeOut: 0,
+      loop: loop ?? role === 'music', muted: false, missing: false, ...(source !== 'local' ? { source } : {}), ...extra }
   }
+  function appendAudioItems(newItems) { if (newItems.length) editTimeline((state) => placeItems(state, 'audio', newItems)) }
   async function addImages(paths) { return importMedia(paths, ['image']) }
   function updateClip(id, patch) {
     const next = clips.map((c) => c.id === id ? { ...c, ...patch } : c)
@@ -765,16 +779,279 @@ export default function App() {
         invalidatesSilence ? null : keepSegments))
     }
   }
+  // Sua dong thoi tracks + item phu + audio (dat item vao track con trong, tao track moi khi can)
+  function editTimeline(mutator) {
+    const next = mutator(timelineStateRef.current)
+    timelineStateRef.current = next
+    setTracks(next.tracks); setVideoOverlays(next.videoOverlays); setAudioItems(next.audioItems)
+  }
+  // Dat item moi vao track: uu tien track mong muon, va cham thi sang track ke tiep, het thi tao track moi (xem track-model.choosePlacement)
+  function placeItems(state, kind, newItems, preferred = null, forceNew = false, ignoreClipAudio = []) {
+    let nextTracks = state.tracks, nextVideo = state.videoOverlays, nextAudio = state.audioItems
+    let newTrackFirst = forceNew, running = preferred
+    const a1Busy = clipAudioSpans(layout).filter((span) => !ignoreClipAudio.includes(span.clipId)).map(({ start, end }) => ({ start, end }))
+    for (const item of newItems) {
+      const prefer = item.trackId || running || (kind === 'video' ? 'V2' : item.track === 'original' ? MAIN_AUDIO_TRACK : 'A2')
+      const { trackId, created } = choosePlacement({ tracks: nextTracks, items: kind === 'video' ? nextVideo : nextAudio, kind, preferred: prefer,
+        span: itemSpan(item, { totalDuration }), totalDuration, extraByTrack: kind === 'audio' ? { [MAIN_AUDIO_TRACK]: a1Busy } : {}, forceNew: newTrackFirst })
+      if (newTrackFirst) { newTrackFirst = false; running = trackId }
+      if (created) nextTracks = normalizeTracks([...nextTracks, created])
+      if (kind === 'video') nextVideo = [...nextVideo, { ...item, trackId, zIndex: layerIndex(nextTracks, trackId) }]
+      else nextAudio = [...nextAudio, { ...item, trackId }]
+    }
+    return { tracks: nextTracks, videoOverlays: nextVideo, audioItems: nextAudio }
+  }
   function addClipToV2(clip) {
     if (!clip || clip.missing) return
     pushHistory()
-    setVideoOverlays((items) => [...items, {
+    editTimeline((state) => placeItems(state, 'video', [{
       id: makeEntityId('video-overlay'), path: clip.path, name: clip.name, kind: isImg(clip) ? 'image' : 'video',
       start: current, in: isImg(clip) ? 0 : clip.in, out: clip.out, speed: isImg(clip) ? 1 : (clip.speed || 1),
-      x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, zIndex: videoOverlays.length,
+      x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1,
       animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false
-    }])
+    }]))
     setStatus(t('msg_added_v2'))
+  }
+  const trackLocked = (trackId) => !!tracks.find((track) => track.id === trackId)?.locked
+  function warnLocked() { setStatus(t('track_locked_msg')) }
+  function patchTrack(id, patch) { pushHistory(); setTracks((items) => items.map((track) => track.id === id ? { ...track, ...patch } : track)) }
+  function addTrack(kind) { pushHistory(); setTracks((items) => normalizeTracks([...items, makeTrack(kind, nextTrackNumber(items, kind))])) }
+  function removeTrack(id) {
+    if (isCoreTrack(id) || [...videoOverlays, ...audioItems].some((item) => item.trackId === id)) return
+    pushHistory(); setTracks((items) => items.filter((track) => track.id !== id))
+  }
+  function removeVideoOverlay(id) {
+    const item = videoOverlays.find((candidate) => candidate.id === id)
+    if (!item) return
+    if (trackLocked(item.trackId)) { warnLocked(); return }
+    pushHistory(); setVideoOverlays((items) => items.filter((candidate) => candidate.id !== id))
+    setSelItem((sel) => (sel?.id === id ? null : sel))
+  }
+  // ---- Tach / gan lai am thanh cua clip V1: tieng thanh doan audio rieng tren track tieng (A1), sua / keo / xoa doc lap ----
+  function detachAudio(clipId, place = null) {
+    const clip = clips.find((candidate) => candidate.id === clipId)
+    const entry = layout.find((seg) => seg.id === clipId)
+    if (!clip || !entry || isImg(clip) || clip.missing || !clip.src?.hasAudio || clip.audioDetached) return
+    if (trackLocked(MAIN_VIDEO_TRACK) || trackLocked(MAIN_AUDIO_TRACK)) { warnLocked(); return }
+    if (autoCut && clips.length === 1) { setStatus(t('msg_detach_blocked_autocut')); return }
+    pushHistory()
+    const item = { ...buildDetachedAudioItem(clip, entry, makeEntityId('audio')), ...(place ? { start: place.start, trackId: place.trackId } : {}) }
+    updateClip(clipId, { audioDetached: true })
+    editTimeline((state) => placeItems(state, 'audio', [item], place?.trackId || MAIN_AUDIO_TRACK, false, [clipId]))
+    setSelItem({ kind: 'audio', id: item.id }); setSelOv(null)
+    setStatus(t('msg_audio_detached'))
+  }
+  function reattachAudio(clipId) {
+    const clip = clips.find((candidate) => candidate.id === clipId)
+    if (!clip?.audioDetached) return
+    pushHistory()
+    updateClip(clipId, { audioDetached: false })
+    setAudioItems((items) => items.filter((item) => item.sourceClipId !== clipId))
+    setSelItem(null)
+    setStatus(t('msg_audio_reattached'))
+  }
+  function toggleDetachSelected() {
+    if (!selectedClip) return
+    if (selectedClip.audioDetached) reattachAudio(selectedClip.id)
+    else detachAudio(selectedClip.id)
+  }
+  // ---- Menu chuot phai va lenh tren clip / item ----
+  function findTarget(target) {
+    if (!target) return null
+    if (target.kind === 'clip') return clips.find((candidate) => candidate.id === target.id) || null
+    if (target.kind === 'v2') return videoOverlays.find((candidate) => candidate.id === target.id) || null
+    if (target.kind === 'audio') return audioItems.find((candidate) => candidate.id === target.id) || null
+    return null
+  }
+  const selectedTarget = selItem ? { kind: selItem.kind, id: selItem.id } : selId ? { kind: 'clip', id: selId } : null
+  function selectTarget(target) { if (target.kind === 'clip') selectClip(target.id); else selectItem({ kind: target.kind, id: target.id }) }
+  function openItemMenu(event, target) {
+    event.preventDefault(); event.stopPropagation()
+    selectTarget(target)
+    setCtxMenu({ x: event.clientX, y: event.clientY, target })
+  }
+  const targetTrackId = (target) => (target.kind === 'clip' ? MAIN_VIDEO_TRACK : findTarget(target)?.trackId)
+  function targetSpan(target) {
+    if (target.kind === 'clip') { const seg = layout.find((entry) => entry.id === target.id); return seg ? { start: seg.start, end: seg.end } : null }
+    const found = findTarget(target)
+    return found ? itemSpan(found, { totalDuration }) : null
+  }
+  function playheadInside(target) {
+    const span = targetSpan(target)
+    return !!span && current > span.start + MIN_PIECE && current < span.end - MIN_PIECE
+  }
+  function copyTarget(target) {
+    const found = findTarget(target)
+    if (!found) return
+    setClipboard({ kind: target.kind, data: JSON.parse(JSON.stringify(found)) })
+    setStatus(t('msg_copied'))
+  }
+  function duplicateTarget(target) {
+    const found = findTarget(target)
+    if (!found) return
+    if (trackLocked(targetTrackId(target))) { warnLocked(); return }
+    if (target.kind === 'clip') {
+      const result = duplicateClipAfter(clips, found.id, makeEntityId('clip'))
+      if (!result) return
+      pushHistory(); setClips(result.clips)
+      setCaptions((items) => remapAnchoredCaptions(result.clips, items, transition))
+      selectClip(result.copy.id)
+      return
+    }
+    const span = itemSpan(found, { totalDuration })
+    const copy = { ...found, id: makeEntityId(target.kind === 'v2' ? 'video-overlay' : 'audio'), start: found.loop ? found.start : span.end, sourceClipId: undefined }
+    pushHistory()
+    editTimeline((state) => placeItems(state, target.kind === 'v2' ? 'video' : 'audio', [copy], found.trackId))
+    selectItem({ kind: target.kind, id: copy.id })
+  }
+  function pasteClipboard() {
+    if (!clipboard) { setStatus(t('msg_nothing_to_paste')); return }
+    const { kind, data } = clipboard
+    if (kind === 'clip') {
+      if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return }
+      const copy = { ...data, id: makeEntityId('clip'), audioDetached: false }
+      const nextClips = [...clipsRef.current]
+      nextClips.splice(insertIndexForTime(layout, current), 0, copy)
+      pushHistory(); setClips(nextClips)
+      setCaptions((items) => remapAnchoredCaptions(nextClips, items, transition))
+      selectClip(copy.id)
+      return
+    }
+    const copy = { ...data, id: makeEntityId(kind === 'v2' ? 'video-overlay' : 'audio'), start: current, sourceClipId: undefined }
+    pushHistory()
+    editTimeline((state) => placeItems(state, kind === 'v2' ? 'video' : 'audio', [copy], data.trackId))
+    selectItem({ kind, id: copy.id })
+  }
+  function splitTarget(target) {
+    const found = findTarget(target)
+    if (!found) return
+    if (trackLocked(targetTrackId(target))) { warnLocked(); return }
+    if (target.kind === 'clip') {
+      if (!playheadInside(target)) { setStatus(t('msg_split_outside')); return }
+      splitAtPlayhead()
+      return
+    }
+    const pieces = splitTimelineItem(found, current, makeEntityId(target.kind === 'v2' ? 'video-overlay' : 'audio'))
+    if (!pieces) { setStatus(t('msg_split_outside')); return }
+    pushHistory()
+    const apply = (items) => items.flatMap((candidate) => (candidate.id === found.id ? pieces : [candidate]))
+    if (target.kind === 'v2') setVideoOverlays(apply); else setAudioItems(apply)
+    selectItem({ kind: target.kind, id: pieces[1].id })
+  }
+  async function freezeFrame(target) {
+    const clip = findTarget(target)
+    if (!clip || target.kind !== 'clip' || isImg(clip) || clip.missing) return
+    if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return }
+    const preview = resolvePreviewSource(timelinePlan, current)
+    const seg = preview && layout[preview.entryIndex]
+    if (!seg || seg.id !== clip.id) { setStatus(t('msg_split_outside')); return }
+    const sourceTime = preview.sourceTime
+    const scope = resourceScopeRef.current, revision = editRevisionRef.current
+    try {
+      setStatus(t('msg_freeze_working'))
+      const png = await window.taoclip.freezeFrame(clip.path, sourceTime)
+      const media = await window.taoclip.inspectMedia(png)
+      if (scope !== resourceScopeRef.current || revision !== editRevisionRef.current) { notify(t('msg_freeze_stale'), 'err'); return }
+      const freeze = { ...makeClipFromMedia(png, `Freeze · ${clip.name}`, media), out: FREEZE_SECONDS, kenBurns: false, cropMode: clip.cropMode, cropX: clip.cropX, cropY: clip.cropY }
+      const result = insertFreezeFrame(clipsRef.current, clip.id, sourceTime, freeze, makeEntityId('clip'))
+      if (!result) { setStatus(t('msg_split_outside')); return }
+      pushHistory(); setClips(result.clips)
+      setCaptions((items) => remapAnchoredCaptions(result.clips, splitAnchoredCaptions(items, clip.id, sourceTime, result.rightId), transition))
+      addLibraryAssets([makeLibraryAsset(png, 'image', media)])
+      selectClip(freeze.id)
+      setStatus(t('msg_freeze_done'))
+    } catch (error) { notify(t('st_err', { e: error.message || error }), 'err') }
+  }
+  function toggleEnhance(target) {
+    const clip = findTarget(target)
+    if (!clip || target.kind !== 'clip' || clip.missing) return
+    pushHistory(); updateClip(clip.id, { enhance: !clip.enhance })
+    setStatus(t(clip.enhance ? 'msg_enhance_off' : 'msg_enhance_on'))
+  }
+  async function saveAudioTarget(target) {
+    const found = findTarget(target)
+    if (!found || found.missing) return
+    const hasAudio = target.kind === 'clip' ? !isImg(found) && !!found.src?.hasAudio : target.kind === 'v2' ? found.kind !== 'image' : true
+    if (!hasAudio) { notify(t('msg_no_audio_to_save'), 'err'); return }
+    const request = { input: found.path, start: found.in, end: found.out, speed: found.speed || 1, defaultName: `${String(found.name || 'audio').replace(/\.[^.]+$/, '')}.wav` }
+    try {
+      const saved = await window.taoclip.saveAudioAs(request)
+      if (saved) notify(t('msg_audio_saved', { p: saved.split(/[\\/]/).pop() }), 'ok', { label: t('open_folder'), run: () => window.taoclip.showInFolder(saved) })
+    } catch (error) { notify(/NO_AUDIO/.test(String(error.message)) ? t('msg_no_audio_to_save') : t('st_err', { e: error.message || error }), 'err') }
+  }
+  async function captionsForClip(target) {
+    const clip = findTarget(target)
+    if (!clip || target.kind !== 'clip' || isImg(clip) || !clip.src?.hasAudio || clip.missing || capBusy) return
+    setTab('text')
+    const expectedRevision = editRevisionRef.current
+    setCapBusy(true); setCapStatus(t('cap_extracting'))
+    try {
+      const segs = await transcribeClips(setCapStatus)
+      if (editRevisionRef.current !== expectedRevision) throw new Error('AI_RESULT_STALE')
+      const mine = segs.filter((caption) => caption.clipId === clip.id).map((caption) => ({ ...caption, id: caption.id || makeEntityId('caption') }))
+      pushHistory()
+      setCaptions((items) => mergeClipCaptions(items, mine, clip.id)); setCaptionTimebase('timeline')
+      setCapStatus(t('cap_count', { n: mine.length }))
+    } catch (e) { setCapStatus(e.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e })) } finally { setCapBusy(false) }
+  }
+  function toggleMuteTarget(target) {
+    const found = findTarget(target)
+    if (!found) return
+    if (target.kind === 'audio') { pushHistory(); updateAudioItem(found.id, { muted: !found.muted }); return }
+    if (target.kind !== 'clip' || isImg(found) || !found.src?.hasAudio || found.audioDetached) return
+    if (!found.audioMuted && autoCut && clips.length === 1) { setStatus(t('msg_mute_blocked_autocut')); return }
+    pushHistory(); updateClip(found.id, { audioMuted: !found.audioMuted })
+  }
+  function toggleLockTarget(target) {
+    const trackId = targetTrackId(target)
+    if (trackId) patchTrack(trackId, { locked: !trackLocked(trackId) })
+  }
+  function deleteTarget(target) {
+    if (target.kind === 'clip') deleteClip(target.id)
+    else if (target.kind === 'v2') removeVideoOverlay(target.id)
+    else removeAudioItem(target.id)
+  }
+  function buildContextItems(target) {
+    const found = findTarget(target)
+    if (!found) return []
+    const clip = target.kind === 'clip' ? found : null
+    const video = !!clip && !isImg(clip)
+    const hasOwnAudio = video && !!clip.src?.hasAudio && !clip.missing
+    const locked = trackLocked(targetTrackId(target))
+    const inside = playheadInside(target)
+    const loopItem = target.kind === 'audio' && !!found.loop
+    const canSaveAudio = target.kind === 'clip' ? hasOwnAudio : target.kind === 'v2' ? found.kind !== 'image' && !found.missing : !found.missing
+    const muted = target.kind === 'audio' ? !!found.muted : !!clip?.audioMuted
+    const muteDisabled = target.kind === 'audio' ? false : !(hasOwnAudio && !clip.audioDetached)
+    const entry = (id, labelKey, icon, run, extra = {}) => ({ id, label: t(labelKey), icon, run, ...extra })
+    return [
+      entry('copy', 'ctx_copy', <Copy size={14} />, () => copyTarget(target), { shortcut: 'Ctrl+C' }),
+      entry('duplicate', 'ctx_duplicate', <CopyPlus size={14} />, () => duplicateTarget(target), { shortcut: 'Ctrl+D', disabled: locked }),
+      entry('paste', 'ctx_paste', <ClipboardPaste size={14} />, pasteClipboard, { shortcut: 'Ctrl+V', disabled: !clipboard }),
+      { separator: true },
+      entry('split', 'ctx_split', <Scissors size={14} />, () => splitTarget(target), { shortcut: 'Ctrl+B', disabled: locked || !inside || loopItem }),
+      entry('freeze', 'ctx_freeze', <Frame size={14} />, () => freezeFrame(target), { shortcut: 'F', disabled: locked || !video || !inside || !!clip?.missing }),
+      entry('enhance', 'ctx_enhance', <Sparkles size={14} />, () => toggleEnhance(target), { disabled: !clip || !!clip.missing, checked: !!clip?.enhance }),
+      { separator: true },
+      clip?.audioDetached
+        ? entry('reattach', 'ctx_reattach', <AudioLines size={14} />, () => reattachAudio(clip.id), { disabled: locked })
+        : entry('detach', 'ctx_detach', <AudioLines size={14} />, () => detachAudio(clip.id), { disabled: !hasOwnAudio || locked }),
+      { separator: true },
+      entry('save-audio', 'ctx_save_audio', <AudioWaveform size={14} />, () => saveAudioTarget(target), { disabled: !canSaveAudio }),
+      entry('captions', 'ctx_captions', <Captions size={14} />, () => captionsForClip(target), { disabled: !hasOwnAudio || capBusy }),
+      { separator: true },
+      entry('mute', muted ? 'ctx_unmute' : 'ctx_mute', <VolumeX size={14} />, () => toggleMuteTarget(target), { shortcut: 'M', disabled: muteDisabled }),
+      entry('lock', locked ? 'ctx_unlock' : 'ctx_lock', locked ? <Unlock size={14} /> : <Lock size={14} />, () => toggleLockTarget(target)),
+      { separator: true },
+      entry('delete', 'ctx_delete', <Trash2 size={14} />, () => deleteTarget(target), { shortcut: 'Del', danger: true, disabled: locked })
+    ]
+  }
+  function selectClip(id) { setSelId(id); setSelOv(null); setSelItem(null) }
+  function selectItem(sel) { setSelItem(sel); setSelOv(null) }
+  function deleteSelectedItem() {
+    if (!selItem) return
+    if (selItem.kind === 'v2') removeVideoOverlay(selItem.id)
+    else removeAudioItem(selItem.id)
   }
   async function addLibraryAssetToTimeline(asset) {
     if (!asset || asset.missing) { notify(t('media_asset_missing'), 'err'); return }
@@ -785,9 +1062,7 @@ export default function App() {
       pushHistory()
       addLibraryAssets([{ ...asset, missing: false, metadata: media }])
       if (media.kind === 'audio') {
-        const item = { id: makeEntityId('audio'), path: asset.path, name: asset.name, track: 'music', start: current, in: 0,
-          out: media.duration, sourceDuration: media.duration, gain: 0.4, fadeIn: 0, fadeOut: 0, loop: true, muted: false, missing: false }
-        setAudioItems((items) => [...items, item])
+        appendAudioItems([makeAudioItem({ path: asset.path, name: asset.name, role: 'music', start: current, duration: media.duration })])
       } else if (media.kind === 'image') {
         const clip = { id: makeEntityId('clip'), kind: 'image', path: asset.path, name: asset.name, animated: media.formatName === 'gif',
           src: { duration: media.duration || slideDur, width: media.width, height: media.height, hasAudio: false, isImage: true, rotation: media.rotation || 0 },
@@ -806,8 +1081,7 @@ export default function App() {
     const key = normalizeMediaPath(asset.path)
     const uses = clips.filter((item) => normalizeMediaPath(item.path) === key).length +
       videoOverlays.filter((item) => normalizeMediaPath(item.path) === key).length +
-      audioItems.filter((item) => normalizeMediaPath(item.path) === key).length +
-      (music?.path && normalizeMediaPath(music.path) === key ? 1 : 0) + (voice?.path && normalizeMediaPath(voice.path) === key ? 1 : 0)
+      audioItems.filter((item) => normalizeMediaPath(item.path) === key).length
     if (uses && !window.confirm(t('media_remove_confirm', { name: asset.name, uses }))) return
     pushHistory()
     setLibraryAssets((items) => items.filter((item) => item.id !== asset.id))
@@ -817,8 +1091,7 @@ export default function App() {
     const key = normalizeMediaPath(asset.path)
     return clips.filter((item) => normalizeMediaPath(item.path) === key).length +
       videoOverlays.filter((item) => normalizeMediaPath(item.path) === key).length +
-      audioItems.filter((item) => normalizeMediaPath(item.path) === key).length +
-      (music?.path && normalizeMediaPath(music.path) === key ? 1 : 0) + (voice?.path && normalizeMediaPath(voice.path) === key ? 1 : 0)
+      audioItems.filter((item) => normalizeMediaPath(item.path) === key).length
   }
   function updateVideoOverlay(id, patch) {
     setVideoOverlays((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item))
@@ -836,6 +1109,7 @@ export default function App() {
     if (updateSlides) setClips((items) => items.map((clip) => isImg(clip) ? { ...clip, in: 0, out: d } : clip))
   }
   function deleteClip(id) {
+    if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return }
     pushHistory()
     const next = clips.filter((c) => c.id !== id)
     setClips(next)
@@ -853,29 +1127,124 @@ export default function App() {
   }
 
   function startReorder(seg, e) {
-    e.stopPropagation(); setSelId(seg.id); setSelOv(null)
+    e.stopPropagation(); setSelId(seg.id); setSelOv(null); setSelItem(null)
+    if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return }
     const fromIdx = clips.findIndex((c) => c.id === seg.id)
-    const startX = e.clientX; let moved = false
+    const startX = e.clientX, startY = e.clientY; let moved = false
+    const span = seg.end - seg.start
+    const overlayRows = [...scrollRef.current.querySelectorAll('.cc-trow.video[data-track-id]')]
+      .filter((row) => row.dataset.trackId !== 'TEXT' && row.dataset.trackId !== MAIN_VIDEO_TRACK)
+      .map((row) => ({ id: row.dataset.trackId, rect: row.getBoundingClientRect() }))
+    let cross = null // { trackId, start }: keo len mot duong phu -> tha xuong se thanh lop phu
     dragRef.current = 'reorder'
     const move = (ev) => {
-      if (!moved && Math.abs(ev.clientX - startX) < 5) return
+      if (!moved && Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return
       moved = true
-      const rect = scrollRef.current.getBoundingClientRect()
-      const gt = (ev.clientX - rect.left + scrollRef.current.scrollLeft) / pps
+      const hit = overlayRows.find((row) => ev.clientY >= row.rect.top && ev.clientY < row.rect.bottom)
+      if (hit) {
+        const start = snapTime(Math.max(0, seg.start + (ev.clientX - startX) / pps), span)
+        cross = { trackId: hit.id, start }
+        setDragInsert(null); setLaneDrag({ trackId: hit.id, time: start })
+        return
+      }
+      cross = null; setLaneDrag(null)
+      const gt = clientXToTime(ev.clientX)
       setDragInsert(layout.filter((s) => gt > (s.start + s.end) / 2).length)
     }
     const up = () => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up)
-      setDragInsert((prev) => {
-        if (moved && prev != null) {
-          const next = [...clips]; const [x] = next.splice(fromIdx, 1); let idx = prev > fromIdx ? prev - 1 : prev; next.splice(idx, 0, x)
-          if (next.some((clip, index) => clip.id !== clips[index]?.id)) {
-            pushHistory()
-            setClips(next); setCaptions((items) => remapAnchoredCaptions(next, items, transition))
+      setLaneDrag(null)
+      if (moved && cross) {
+        setDragInsert(null)
+        promoteClipToOverlay(seg.id, cross.trackId, cross.start)
+      } else {
+        setDragInsert((prev) => {
+          if (moved && prev != null) {
+            const next = [...clips]; const [x] = next.splice(fromIdx, 1); let idx = prev > fromIdx ? prev - 1 : prev; next.splice(idx, 0, x)
+            if (next.some((clip, index) => clip.id !== clips[index]?.id)) {
+              pushHistory()
+              setClips(next); setCaptions((items) => remapAnchoredCaptions(next, items, transition))
+            }
           }
-        }
-        return null
-      })
+          return null
+        })
+      }
+      setTimeout(() => { dragRef.current = null }, 0)
+    }
+    attachDocumentMouseDrag(move, up)
+  }
+
+  // Clip V1 -> lop phu tren duong V2+: clip roi V1 (cac clip sau don lai), tieng cua no thanh doan tieng cung thoi diem
+  function promoteClipToOverlay(clipId, laneId, start) {
+    const clip = clipsRef.current.find((candidate) => candidate.id === clipId)
+    if (!clip || clip.missing) return false
+    if (trackLocked(MAIN_VIDEO_TRACK) || trackLocked(laneId)) { warnLocked(); return false }
+    if (clipsRef.current.length <= 1) { notify(t('tl_promote_last'), 'err'); return false }
+    pushHistory()
+    const image = isImg(clip)
+    const overlay = {
+      id: makeEntityId('video-overlay'), path: clip.path, name: clip.name, kind: image ? 'image' : 'video',
+      start, in: image ? 0 : clip.in, out: clip.out, speed: image ? 1 : (clip.speed || 1),
+      x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false
+    }
+    const carryAudio = !image && !!clip.src?.hasAudio && !clip.audioDetached && !clip.audioMuted
+    const audio = carryAudio ? { ...buildDetachedAudioItem(clip, { start }, makeEntityId('audio')), sourceClipId: undefined } : null
+    const next = clipsRef.current.filter((candidate) => candidate.id !== clipId)
+    setClips(next)
+    setCaptions((items) => remapAnchoredCaptions(next, items, transition))
+    editTimeline((state) => {
+      let result = placeItems(state, 'video', [overlay], laneId)
+      if (audio) result = placeItems(result, 'audio', [audio], MAIN_AUDIO_TRACK, false, [clipId])
+      return { ...result, audioItems: result.audioItems.map((item) => (item.sourceClipId === clipId ? { ...item, sourceClipId: undefined } : item)) }
+    })
+    setSelId(null); setSelOv(null); setSelItem({ kind: 'v2', id: overlay.id })
+    return true
+  }
+  // Item V2+ -> clip V1 tai thoi diem tha (chen giua cac clip)
+  async function demoteOverlayToMain(item, time) {
+    if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return false }
+    const scope = resourceScopeRef.current
+    const key = normalizeMediaPath(item.path)
+    let media = libraryAssetsRef.current.find((asset) => normalizeMediaPath(asset.path) === key)?.metadata
+    if (!media || !(media.duration > 0 || media.width > 0)) {
+      try { media = await window.taoclip.inspectMedia(item.path) }
+      catch (error) { notify(t('st_err', { e: error.message || error }), 'err'); return false }
+    }
+    if (resourceScopeRef.current !== scope) return false
+    const image = item.kind === 'image'
+    const base = makeClipFromMedia(item.path, item.name, { ...media, kind: item.kind })
+    const clip = { ...base, in: image ? 0 : item.in, out: item.out, speed: image ? 1 : (item.speed || 1), animated: !!item.animated || !!base.animated }
+    const nextClips = [...clipsRef.current]
+    nextClips.splice(insertIndexForTime(layout, time), 0, clip)
+    setClips(nextClips)
+    setCaptions((items) => remapAnchoredCaptions(nextClips, items, transition))
+    editTimeline((state) => ({ ...state, videoOverlays: state.videoOverlays.filter((candidate) => candidate.id !== item.id) }))
+    setSelId(clip.id); setSelItem(null)
+    if (!image) { loadThumbnails(clip.id, clip.path); loadWave(clip.id, clip.path, !!clip.src?.hasAudio) }
+    return true
+  }
+  // Khoi tieng goc A1: keo sang duong tieng khac (hoac doi thoi diem) thi tach khoi clip va dat tai cho tha
+  function startClipAudioDrag(seg, e) {
+    if (e.button !== 0 || !seg.clip) return
+    const startX = e.clientX, startY = e.clientY
+    const span = seg.end - seg.start
+    const lanes = [...scrollRef.current.querySelectorAll('.cc-trow.audio[data-track-id]')].map((row) => ({ id: row.dataset.trackId, rect: row.getBoundingClientRect() }))
+    let moved = false, lane = MAIN_AUDIO_TRACK, start = seg.start
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return
+      moved = true; dragRef.current = 'clip-audio'
+      start = snapTime(Math.max(0, seg.start + (ev.clientX - startX) / pps), span)
+      const hit = lanes.find((row) => ev.clientY >= row.rect.top && ev.clientY < row.rect.bottom)
+      if (hit) lane = hit.id
+      setLaneDrag({ trackId: lane, time: start })
+    }
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up)
+      setLaneDrag(null)
+      if (moved && !(lane === MAIN_AUDIO_TRACK && Math.abs(start - seg.start) < 0.05)) {
+        if (trackLocked(lane)) warnLocked()
+        else detachAudio(seg.id, { trackId: lane, start })
+      }
       setTimeout(() => { dragRef.current = null }, 0)
     }
     attachDocumentMouseDrag(move, up)
@@ -919,7 +1288,11 @@ export default function App() {
     if (ps?.length) addImages(ps)
   }
   function onDragOver(e) { e.preventDefault(); setDragOver(true) }
-  function onDragLeave(e) { e.preventDefault(); setDragOver(false) }
+  function onDragLeave(e) {
+    e.preventDefault()
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    setDragOver(false)
+  }
   function onDrop(e) {
     e.preventDefault(); setDragOver(false)
     const paths = [...e.dataTransfer.files].map((file) => window.taoclip.getDroppedPath(file)).filter(Boolean)
@@ -989,7 +1362,7 @@ export default function App() {
   function onLoadedMeta() {
     const v = videoRef.current; if (!v || !activeClip) return
     setPreviewLoading(false); setPreviewError('')
-    v.playbackRate = activeClip.speed || 1; v.volume = volume * origVolume * mainPreviewOpacity; v.muted = muted
+    v.playbackRate = activeClip.speed || 1; v.volume = volume * effOrigVolume * mainPreviewOpacity; v.muted = muted || clipSilent
     // Tu sua thoi luong neu probe thieu (out=0 hoac vuot qua video that)
     if (v.duration && isFinite(v.duration) && (!activeClip.out || activeClip.out < 0.05 || activeClip.out > v.duration + 0.5)) {
       updateClip(activeClip.id, { out: v.duration, src: { ...activeClip.src, duration: v.duration } })
@@ -1045,6 +1418,7 @@ export default function App() {
 
   // ---- Tach clip tai playhead thanh 2 clip (giu nguyen file nguon) ----
   function splitAtPlayhead() {
+    if (trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); return }
     const preview = resolvePreviewSource(timelinePlan, current)
     const seg = preview && layout[preview.entryIndex]
     if (!seg) return
@@ -1079,12 +1453,10 @@ export default function App() {
   }
 
   // ---- Timeline ----
-  function clientXToTime(clientX) {
-    const rect = scrollRef.current.getBoundingClientRect()
-    return (clientX - rect.left + scrollRef.current.scrollLeft) / pps
-  }
+  function clientXToTime(clientX) { return geometryClientXToTime(clientX, scrollRef.current, pps) }
   function timelineClick(e) {
     if (dragRef.current) return
+    setSelItem(null)
     seekGlobal(clientXToTime(e.clientX))
   }
   // Keo playhead/ruler -> tua truc tiep (preview cap nhat theo giay)
@@ -1096,6 +1468,7 @@ export default function App() {
     attachDocumentMouseDrag(move, up)
   }
   function startTrim(clip, which, e) {
+    if (trackLocked(MAIN_VIDEO_TRACK)) { e.stopPropagation(); warnLocked(); return }
     e.stopPropagation(); setSelId(clip.id); beginHistoryEdit(); dragRef.current = which
     const startX = e.clientX, origIn = clip.in, origOut = clip.out
     const move = (ev) => {
@@ -1113,7 +1486,32 @@ export default function App() {
     const up = () => { dragRef.current = null; setTrimTooltip(null); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); endHistoryEdit() }
     attachDocumentMouseDrag(move, up)
   }
-  function fitZoom() { if (totalDuration && scrollRef.current) setPps(clamp((scrollRef.current.clientWidth - 40) / totalDuration, 20, 300)) }
+  // Thu phong theo nhan, giu yen thoi diem o anchorClientX (mac dinh: giua vung nhin) de khong bi tru ve dau timeline
+  function zoomBy(factor, anchorClientX = null) {
+    const el = scrollRef.current
+    const target = clampPps(ppsRef.current * factor)
+    if (target === ppsRef.current) return
+    if (el && !zoomAnchorRef.current) {
+      const rect = el.getBoundingClientRect()
+      const x = Math.max(HEAD_W, anchorClientX == null ? HEAD_W + (rect.width - HEAD_W) / 2 : anchorClientX - rect.left)
+      zoomAnchorRef.current = { time: (el.scrollLeft + x - HEAD_W) / ppsRef.current, x }
+    }
+    ppsRef.current = target
+    setPps(target)
+  }
+  const zoomByRef = useRef(zoomBy)
+  zoomByRef.current = zoomBy
+  // Vua khung: ca timeline nam trong man hinh (video 1 gio van xem het duoc), cuon ve dau
+  function fitZoom() {
+    const el = scrollRef.current
+    if (!totalDuration || !el) return
+    const target = fitPps(totalDuration, el.clientWidth)
+    zoomAnchorRef.current = null
+    if (target === ppsRef.current) { el.scrollLeft = 0; return }
+    zoomAnchorRef.current = { time: 0, x: HEAD_W }
+    ppsRef.current = target
+    setPps(target)
+  }
 
   // ---- Snap: bam vao mep clip / playhead / dau-cuoi khi keo tren timeline ----
   // dur > 0: snap ca mep phai (tt+dur) roi quy ve diem dau
@@ -1130,30 +1528,134 @@ export default function App() {
     return Math.max(0, best)
   }
 
-  // ---- Keo khoi LONG TIENG tren timeline -> doi diem bat dau ----
-  function startVoiceDrag(e) {
-    e.stopPropagation(); beginHistoryEdit(); dragRef.current = 'voice'
-    const startX = e.clientX, orig = voiceOffset
-    const move = (ev) => {
-      let nt = clamp(orig + (ev.clientX - startX) / pps, 0, Math.max(0, totalDuration - 0.1))
-      setVoiceOffset(snapTime(nt, voiceDur))
-    }
-    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); endHistoryEdit(); setTimeout(() => { dragRef.current = null }, 0) }
-    attachDocumentMouseDrag(move, up)
-  }
-  function startAudioItemDrag(item, e) {
-    if (e.target.closest('button')) return
-    e.stopPropagation(); beginHistoryEdit(); dragRef.current = `audio:${item.id}`
-    const startX = e.clientX, original = item.start, span = item.loop ? 0 : item.out - item.in
-    const move = (event) => {
-      const nextStart = snapTime(Math.max(0, original + (event.clientX - startX) / pps), span)
-      updateAudioItem(item.id, { start: nextStart })
-    }
-    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); endHistoryEdit(); setTimeout(() => { dragRef.current = null }, 0) }
-    attachDocumentMouseDrag(move, up)
-  }
 
   // ---- Keo khoi CHU/STICKER tren timeline: di chuyen / keo mep doi thoi luong ----
+  // ---- Keo item phu (V2+) / audio: doi thoi diem (ngang) va doi track (doc); va cham duoc xu ly luc tha ----
+  function startItemDrag(kind, item, e) {
+    if (e.target.closest('button')) return
+    if (trackLocked(item.trackId)) { e.stopPropagation(); warnLocked(); return }
+    e.stopPropagation(); beginHistoryEdit(); dragRef.current = `${kind}:${item.id}`
+    selectItem({ kind, id: item.id })
+    const startX = e.clientX, original = item.start
+    const speed = Number(item.speed) > 0 ? Number(item.speed) : 1
+    const span = item.loop ? 0 : (item.out - item.in) / speed
+    const lanes = [...scrollRef.current.querySelectorAll(kind === 'v2' ? '.cc-trow.video[data-track-id]' : '.cc-trow.audio[data-track-id]')]
+      .filter((row) => row.dataset.trackId !== 'TEXT' && row.dataset.trackId !== MAIN_VIDEO_TRACK)
+      .map((row) => ({ id: row.dataset.trackId, rect: row.getBoundingClientRect() }))
+    const mainRect = kind === 'v2' && !item.sticker && item.path ? scrollRef.current.querySelector(`.cc-trow[data-track-id="${MAIN_VIDEO_TRACK}"]`)?.getBoundingClientRect() : null
+    let target = { trackId: item.trackId, start: original }
+    const apply = (patch) => (kind === 'v2'
+      ? setVideoOverlays((items) => items.map((candidate) => candidate.id === item.id ? { ...candidate, ...patch } : candidate))
+      : setAudioItems((items) => items.map((candidate) => candidate.id === item.id ? { ...candidate, ...patch } : candidate)))
+    const move = (event) => {
+      const start = snapTime(Math.max(0, original + (event.clientX - startX) / pps), span)
+      const hit = lanes.find((lane) => event.clientY >= lane.rect.top && event.clientY < lane.rect.bottom)
+      const overMain = !!mainRect && event.clientY >= mainRect.top && event.clientY < mainRect.bottom
+      const trackId = overMain ? item.trackId : (hit && !trackLocked(hit.id) ? hit.id : target.trackId)
+      target = { trackId, start, toMain: overMain }
+      setLaneDrag(overMain ? { trackId: MAIN_VIDEO_TRACK, time: start } : null)
+      apply({ start, trackId, ...(kind === 'v2' ? { zIndex: layerIndex(timelineStateRef.current.tracks, trackId) } : {}) })
+    }
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up)
+      setLaneDrag(null)
+      if (target.toMain) {
+        // Tha len V1: chuyen thanh clip V1 (bat dong bo vi co the phai doc thong tin media); chi chot lich su khi xong
+        demoteOverlayToMain(item, target.start).finally(() => endHistoryEdit())
+        setTimeout(() => { dragRef.current = null }, 0)
+        return
+      }
+      const state = timelineStateRef.current
+      const others = (kind === 'v2' ? state.videoOverlays : state.audioItems).filter((candidate) => candidate.id !== item.id)
+      const placement = choosePlacement({ tracks: state.tracks, items: others, kind: kind === 'v2' ? 'video' : 'audio', preferred: target.trackId,
+        span: itemSpan({ ...item, start: target.start }, { totalDuration }), totalDuration,
+        extraByTrack: kind === 'audio' ? { [MAIN_AUDIO_TRACK]: clipAudioSpans(layout).map(({ start, end }) => ({ start, end })) } : {} })
+      if (placement.trackId !== target.trackId || placement.created) {
+        editTimeline((current) => {
+          const nextTracks = placement.created ? normalizeTracks([...current.tracks, placement.created]) : current.tracks
+          const patch = { start: target.start, trackId: placement.trackId, ...(kind === 'v2' ? { zIndex: layerIndex(nextTracks, placement.trackId) } : {}) }
+          const mapItems = (items) => items.map((candidate) => candidate.id === item.id ? { ...candidate, ...patch } : candidate)
+          return { tracks: nextTracks, videoOverlays: kind === 'v2' ? mapItems(current.videoOverlays) : current.videoOverlays,
+            audioItems: kind === 'audio' ? mapItems(current.audioItems) : current.audioItems }
+        })
+      }
+      endHistoryEdit()
+      setTimeout(() => { dragRef.current = null }, 0)
+    }
+    attachDocumentMouseDrag(move, up)
+  }
+  function startV2Move(item, e) { startItemDrag('v2', item, e) }
+  function startAudioItemDrag(item, e) { startItemDrag('audio', item, e) }
+
+  // ---- Tha file (tu he dieu hanh) hoac asset thu vien vao mot lane cu the, dung thoi diem tha ----
+  async function handleLaneDrop(event, lane) {
+    setDragOver(false)
+    const time = Math.max(0, clientXToTime(event.clientX))
+    let sources = []
+    const rawAsset = event.dataTransfer.getData(ASSET_DRAG_TYPE)
+    if (rawAsset) { try { const asset = JSON.parse(rawAsset); sources = [{ path: asset.path, name: asset.name }] } catch { sources = [] } }
+    else sources = [...event.dataTransfer.files].map((file) => window.taoclip.getDroppedPath(file)).filter(Boolean).map((p) => ({ path: p, name: p.split(/[\\/]/).pop() }))
+    if (!sources.length) { setStatus(t('st_not_media', { f: '' })); return }
+    await placeDroppedMedia(sources, lane, time)
+  }
+  async function placeDroppedMedia(sources, lane, time) {
+    const scope = resourceScopeRef.current
+    const found = [], failures = []
+    for (const source of sources) {
+      try { found.push({ ...source, media: await window.taoclip.inspectMedia(source.path) }) }
+      catch (error) { failures.push(`${source.name}: ${String(error.message || error).slice(0, 160)}`) }
+    }
+    if (resourceScopeRef.current !== scope) { notify(t('msg_pick_media_project_changed'), 'err'); return }
+    const audioFiles = [], overlayFiles = [], mainFiles = []
+    for (const item of found) {
+      const kind = item.media.kind
+      if (lane.kind === 'audio') {
+        if (kind === 'audio') audioFiles.push({ ...item, role: 'music' })
+        else if (kind === 'video' && item.media.hasAudio) audioFiles.push({ ...item, role: 'original' })
+        else failures.push(t('msg_drop_no_audio', { f: item.name }))
+      } else if (kind === 'audio') audioFiles.push({ ...item, role: 'music' })
+      else if (lane.forceNew || lane.trackId !== MAIN_VIDEO_TRACK) overlayFiles.push(item)
+      else mainFiles.push(item)
+    }
+    if (mainFiles.length && trackLocked(MAIN_VIDEO_TRACK)) { warnLocked(); mainFiles.length = 0 }
+    if (failures.length) notify(failures.slice(0, 3).join('\n'), 'err')
+    const total = audioFiles.length + overlayFiles.length + mainFiles.length
+    if (!total) return
+    pushHistory()
+    addLibraryAssets(found.map((item) => makeLibraryAsset(item.path, item.media.kind, item.media)))
+    if (mainFiles.length) {
+      const built = mainFiles.map((item) => makeClipFromMedia(item.path, item.name, item.media))
+      const nextClips = [...clipsRef.current]
+      nextClips.splice(insertIndexForTime(layout, time), 0, ...built)
+      setClips(nextClips)
+      setCaptions((items) => remapAnchoredCaptions(nextClips, items, transition))
+      setSelId(built[0].id); setSelItem(null)
+      built.filter((clip) => !isImg(clip)).forEach((clip) => { loadThumbnails(clip.id, clip.path); loadWave(clip.id, clip.path, clip.src.hasAudio) })
+    }
+    if (overlayFiles.length) {
+      let cursor = time
+      const items = overlayFiles.map((item) => {
+        const image = item.media.kind === 'image'
+        const length = image ? slideDur : item.media.duration
+        const overlay = { id: makeEntityId('video-overlay'), path: item.path, name: item.name, kind: image ? 'image' : 'video', start: cursor, in: 0, out: length,
+          speed: 1, x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: item.media.formatName === 'gif', sourceDuration: length, missing: false }
+        cursor += length
+        return overlay
+      })
+      editTimeline((state) => placeItems(state, 'video', items, lane.trackId, !!lane.forceNew))
+    }
+    if (audioFiles.length) {
+      let cursor = time
+      const items = audioFiles.map((item) => {
+        const audio = makeAudioItem({ path: item.path, name: item.role === 'original' ? `${item.name} ♪` : item.name, role: item.role, start: cursor, duration: item.media.duration, loop: false })
+        cursor += item.media.duration
+        return audio
+      })
+      editTimeline((state) => placeItems(state, 'audio', items, lane.kind === 'audio' ? lane.trackId : null, lane.kind === 'audio' && !!lane.forceNew))
+    }
+    setStatus(t('msg_dropped', { n: total }))
+  }
+
   function startOvMove(o, e) {
     e.stopPropagation(); setSelOv(o.id); beginHistoryEdit(); dragRef.current = 'ovmove'
     const startX = e.clientX, s0 = o.start, dur = o.end - o.start
@@ -1165,17 +1667,8 @@ export default function App() {
     const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); endHistoryEdit(); setTimeout(() => { dragRef.current = null }, 0) }
     attachDocumentMouseDrag(move, up)
   }
-  function startV2Move(item, e) {
-    e.stopPropagation(); beginHistoryEdit(); dragRef.current = 'v2move'
-    const startX = e.clientX, start = item.start, dur = (item.out - item.in) / item.speed
-    const move = (event) => {
-      const next = snapTime(Math.max(0, start + (event.clientX - startX) / pps), dur)
-      setVideoOverlays((items) => items.map((candidate) => candidate.id === item.id ? { ...candidate, start: next } : candidate))
-    }
-    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); endHistoryEdit(); setTimeout(() => { dragRef.current = null }, 0) }
-    attachDocumentMouseDrag(move, up)
-  }
   function startV2Resize(item, e) {
+    if (trackLocked(item.trackId)) { e.stopPropagation(); warnLocked(); return }
     e.stopPropagation(); beginHistoryEdit(); dragRef.current = 'v2resize'
     const startX = e.clientX, out = item.out
     const move = (event) => {
@@ -1200,7 +1693,7 @@ export default function App() {
   }
 
   // Tinh truoc cac hook ben duoi: mang phu thuoc cua phim tat doc projectDirty luc render (const khong duoc hoist)
-  const serializedProject = JSON.stringify(buildProject())
+  const serializedProject = projectKey(buildProject())
   const projectDirty = savedProjectSerialized != null && savedProjectSerialized !== serializedProject
 
   // ---- Phim tat ----
@@ -1217,17 +1710,23 @@ export default function App() {
       else if (!e.ctrlKey && !e.metaKey && (e.key === 'i' || e.key === 'I')) { const ph = playheadInClip(); if (ph) { const nextIn = clamp(ph.src, 0, ph.clip.out - 0.1); if (nextIn !== ph.clip.in) { pushHistory(); updateClip(ph.clip.id, { in: nextIn }) } } }
       else if (!e.ctrlKey && !e.metaKey && (e.key === 'o' || e.key === 'O')) { const ph = playheadInClip(); if (ph) { const nextOut = clamp(ph.src, ph.clip.in + 0.1, ph.clip.src.duration); if (nextOut !== ph.clip.out) { pushHistory(); updateClip(ph.clip.id, { out: nextOut }) } } }
       else if (!e.ctrlKey && !e.metaKey && (e.key === 's' || e.key === 'S')) splitAtPlayhead()
-      else if (e.key === 'Delete' || e.key === 'Backspace') { if (selOv) delOverlay(selOv); else if (selId) deleteClip(selId) }
+      else if (e.key === 'Delete' || e.key === 'Backspace') { if (selItem) deleteSelectedItem(); else if (selOv) delOverlay(selOv); else if (selId) deleteClip(selId) }
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'c' || e.key === 'C')) { if (selectedTarget) { e.preventDefault(); copyTarget(selectedTarget) } }
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteClipboard() }
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (selectedTarget) duplicateTarget(selectedTarget) }
+      else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); if (selectedTarget) splitTarget(selectedTarget) }
+      else if (!e.ctrlKey && !e.metaKey && (e.key === 'f' || e.key === 'F')) { if (selectedTarget) freezeFrame(selectedTarget) }
+      else if (!e.ctrlKey && !e.metaKey && (e.key === 'm' || e.key === 'M')) { if (selectedTarget) toggleMuteTarget(selectedTarget) }
       else if (e.key === '?') setShowKeys((s) => !s)
       else if (e.key === 'Escape') { setShowKeys(false); if (!exporting) setShowExport(false) }
-      else if (e.key === '+' || e.key === '=') setPps((p) => Math.min(300, p + 20))
-      else if (e.key === '-' || e.key === '_') setPps((p) => Math.max(20, p - 20))
+      else if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP)
+      else if (e.key === '-' || e.key === '_') zoomBy(1 / ZOOM_STEP)
       else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? redo() : undo() }
       else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, totalDuration, clips, activeIdx, seekGlobal, togglePlay, selId, selOv, overlays, captions, music, voice, bgDur, voiceDur, voiceOffset, exporting, projectPath, projectDirty, saveProject, saveProjectAs])
+  }, [current, totalDuration, clips, activeIdx, seekGlobal, togglePlay, selId, selOv, overlays, captions, audioItems, videoOverlays, tracks, selItem, clipboard, layout, exporting, projectPath, projectDirty, saveProject, saveProjectAs])
 
   // ---- Ctrl + lan chuot tren timeline = thu phong ----
   useEffect(() => {
@@ -1235,7 +1734,7 @@ export default function App() {
     const onWheel = (e) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      setPps((p) => clamp(p + (e.deltaY < 0 ? 20 : -20), 20, 300))
+      zoomByRef.current(Math.exp(-clamp(e.deltaY, -240, 240) * 0.0015), e.clientX)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -1267,7 +1766,7 @@ export default function App() {
     })
     try {
       const opts = { language: capLang, audioSource: captionAudioSource, totalDuration: timelinePlan.duration,
-        audioItems: getProjectAudioItems().filter((item) => item.track === 'voice').map(({ path, start, in: sourceIn, out, gain, fadeIn, fadeOut }) => ({ path, start, in: sourceIn, out, gain, fadeIn, fadeOut })) }
+        audioItems: audioItems.filter((item) => item.track === 'voice').map(({ path, start, in: sourceIn, out, gain, fadeIn, fadeOut }) => ({ path, start, in: sourceIn, out, gain, fadeIn, fadeOut })) }
       opts.clips = clips.map((c) => ({ id: c.id, input: c.path, in: c.in, out: c.out, speed: c.speed }))
       opts.editPlan = toExportSegments(timelinePlan)
       const result = await window.taoclip.generateCaptions(clips.length > 1 ? null : clips[0].path, opts)
@@ -1413,6 +1912,7 @@ export default function App() {
     }
   }
   function applySilenceAnalysis() {
+    if (clips[0]?.audioDetached || clips[0]?.audioMuted) { setStatus(t('msg_autocut_blocked_detached')); return }
     const sourceKey = clips[0] && JSON.stringify({ id: clips[0].id, path: clips[0].path, in: clips[0].in, out: clips[0].out, speed: clips[0].speed })
     if (autoInfo?.sourceKey && autoInfo.sourceKey !== sourceKey) { setStatus(t('msg_silence_source_changed')); return }
     if (autoInfo?.options?.noise !== `${silenceParams.threshold}dB` || autoInfo?.options?.minSilence !== silenceParams.minSilence) { setStatus(t('msg_silence_params_changed')); return }
@@ -1430,25 +1930,19 @@ export default function App() {
   }
 
   // ---- Am thanh: 2 track (nhac + giong) ----
-  async function setMusicFile(p) {
-    pushHistory()
-    addLibraryAssets([makeLibraryAsset(p, 'audio')])
-    const scope = resourceScopeRef.current
-    const ticket = asyncResourceGuardRef.current.begin('track:music:duration', p, scope)
-    commitMusic({ path: p, name: p.split(/[\\/]/).pop() }); setBgLoop(true); setMusicVol(0.4); setMusicWave(null)
-    loadTrackWave('music', p)
-    try {
-      const m = await window.taoclip.probe(p)
-      if (asyncResourceGuardRef.current.isCurrent(ticket, musicWavePathRef.current, resourceScopeRef.current)) setBgDur(m.duration || 0)
-    } catch (e) {
-      if (asyncResourceGuardRef.current.isCurrent(ticket, musicWavePathRef.current, resourceScopeRef.current)) setBgDur(0)
-    }
-  }
   async function importMusic() {
     const scope = resourceScopeRef.current
     const p = await window.taoclip.openAudio()
     if (scope !== resourceScopeRef.current) { if (p) notify(t('msg_music_project_changed'), 'err'); return }
-    if (p) setMusicFile(p)
+    if (!p) return
+    try {
+      const media = await window.taoclip.inspectMedia(p)
+      if (media.kind !== 'audio') throw new Error(t('msg_audio_invalid'))
+      if (scope !== resourceScopeRef.current) { notify(t('msg_music_project_changed'), 'err'); return }
+      pushHistory()
+      addLibraryAssets([makeLibraryAsset(p, 'audio', media)])
+      appendAudioItems([makeAudioItem({ path: p, name: p.split(/[\\/]/).pop(), role: 'music', start: 0, duration: media.duration })])
+    } catch (error) { notify(t('st_err', { e: error.message || error }), 'err') }
   }
   async function addAudioItems(track) {
     const scope = resourceScopeRef.current
@@ -1460,16 +1954,14 @@ export default function App() {
       try {
         const media = await window.taoclip.inspectMedia(filePath)
         if (media.kind !== 'audio') throw new Error(t('msg_audio_invalid'))
-        additions.push({ id: makeEntityId('audio'), path: filePath, name: filePath.split(/[\\/]/).pop(), track,
-          start: current, in: 0, out: media.duration, sourceDuration: media.duration, gain: track === 'music' ? 0.4 : 1, fadeIn: 0, fadeOut: 0,
-          loop: track === 'music', muted: false, missing: false })
+        additions.push(makeAudioItem({ path: filePath, name: filePath.split(/[\\/]/).pop(), role: track, start: current, duration: media.duration }))
       } catch (error) { errors.push(`${filePath.split(/[\\/]/).pop()}: ${error.message}`) }
     }
     if (resourceScopeRef.current !== scope) { notify(t('msg_audio_inspect_project_changed'), 'err'); return }
     if (additions.length) {
       pushHistory()
       addLibraryAssets(additions.map((item) => makeLibraryAsset(item.path, 'audio', { duration: item.sourceDuration })))
-      setAudioItems((items) => [...items, ...additions])
+      appendAudioItems(additions)
     }
     setStatus(t('msg_audio_added', { n: additions.length }) + (errors.length ? ` · ${t('msg_errors_suffix', { n: errors.length })}` : ''))
     if (errors.length) notify(errors.slice(0, 3).join('\n'), 'err')
@@ -1477,7 +1969,13 @@ export default function App() {
   function updateAudioItem(id, patch) {
     setAudioItems((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item))
   }
-  function removeAudioItem(id) { pushHistory(); setAudioItems((items) => items.filter((item) => item.id !== id)) }
+  function removeAudioItem(id) {
+    const item = audioItems.find((candidate) => candidate.id === id)
+    if (!item) return
+    if (trackLocked(item.trackId)) { warnLocked(); return }
+    pushHistory(); setAudioItems((items) => items.filter((candidate) => candidate.id !== id))
+    setSelItem((sel) => (sel?.id === id ? null : sel))
+  }
   const ttsOpts = () => ttsEngine === 'google'
     ? { engine: 'google', voice: ttsVoice, rate: ttsRate, pitch: ttsPitch, langCode: 'vi-VN' }
     : { engine: 'local' }
@@ -1499,9 +1997,8 @@ export default function App() {
       if (ttsEngine === 'local') await refreshLocalTtsModel()
       if (editRevisionRef.current !== expectedRevision || ttsTextRef.current.trim() !== expectedText) throw new Error('AI_RESULT_STALE')
       pushHistory()
-      commitVoice({ path: r.path, name: t('tts_label') }); setVoiceVol(1); setVoiceDur(r.duration || 0); setVoiceOffset(0); setTtsStatus('')
+      appendAudioItems([makeAudioItem({ path: r.path, name: t('tts_label'), role: 'voice', start: current, duration: r.duration || 0, source: 'tts' })]); setTtsStatus('')
       addLibraryAssets([makeLibraryAsset(r.path, 'audio', { duration: r.duration || 0 }, 'tts')])
-      setVoiceWave(null); loadTrackWave('voice', r.path)
     } catch (e) { setTtsStatus(e.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e })) } finally { off(); setTtsBusy(false) }
   }
   // Re-dub is a reviewable sequence: prepare transcript, synthesize each line,
@@ -1558,9 +2055,9 @@ export default function App() {
       const r = await window.taoclip.redub({ segments: redubSegments, totalDur: totalDuration, tts: ttsOpts() })
       if (editRevisionRef.current !== expectedRevision) throw new Error('AI_RESULT_STALE')
       pushHistory()
-      commitVoice({ path: r.path, name: t('redub_voice_name') }); setVoiceVol(1); setVoiceDur(r.duration || totalDuration); setVoiceOffset(0)
+      setAudioItems((items) => [...items.filter((item) => item.source !== 'redub'),
+        makeAudioItem({ path: r.path, name: t('redub_voice_name'), role: 'voice', start: 0, duration: r.duration || totalDuration, source: 'redub' })])
       addLibraryAssets([makeLibraryAsset(r.path, 'audio', { duration: r.duration || totalDuration }, 'tts')])
-      setVoiceWave(null); loadTrackWave('voice', r.path)
       setOrigVolume(redubKeepOriginal ? 1 : 0); setMuted(!redubKeepOriginal)
       setRedubStatus(t('redub_done', { n: redubSegments.length }))
     } catch (e) { setRedubStatus(e.message === 'AI_RESULT_STALE' ? t('ai_result_stale') : t('st_err', { e })) } finally { off(); setRedubBusy(false) }
@@ -1784,11 +2281,11 @@ export default function App() {
   function addStickerToV2(id) {
     if (!id) return
     pushHistory()
-    setVideoOverlays((items) => [...items, {
+    editTimeline((state) => placeItems(state, 'video', [{
       id: makeEntityId('sticker'), sticker: id, path: '', name: stickerChar(id) || id, kind: 'image',
       start: current, in: 0, out: 3, speed: 1, x: 0.5, y: 0.5, width: 0.2, height: 0.2, opacity: 1,
-      zIndex: videoOverlays.length, animated: false, missing: false
-    }])
+      animated: false, missing: false
+    }]))
   }
   function updateOverlay(id, patch) {
     setOverlays((os) => os.map((o) => {
@@ -1837,7 +2334,6 @@ export default function App() {
     })
   }
   function delOverlay(id) { pushHistory(); setOverlays((os) => os.filter((o) => o.id !== id)); if (selOv === id) setSelOv(null) }
-  function delVideoOverlay(id) { pushHistory(); setVideoOverlays((items) => items.filter((item) => item.id !== id)) }
   function startOverlayDrag(o, e) {
     e.stopPropagation(); setSelOv(o.id)
     const frame = e.currentTarget.closest('.cc-frame'); if (!frame) return
@@ -1850,29 +2346,35 @@ export default function App() {
 
   const activeCaption = captions.find((c) => !c.unmapped && current >= c.start && current < c.end)
   const activeOverlays = overlays.filter((o) => current >= o.start && current < o.end)
-  const activeVideoOverlays = videoOverlays.filter((item) => current >= item.start && current < item.start + (item.out - item.in) / item.speed)
+  const activeVideoOverlays = videoOverlays
+    .filter((item) => visibleVideoIds.has(item.trackId) && current >= item.start && current < item.start + (item.out - item.in) / item.speed)
+    .map((item) => ({ ...item, zIndex: layerIndex(tracks, item.trackId) }))
+    .sort((a, b) => a.zIndex - b.zIndex)
   const overlayOutsideSafe = safeZone && ratio !== 'original' && activeOverlays.some((o) => o.x < 0.03 || o.x > 0.86 || o.y < 0.12 || o.y > 0.82)
   const anyAudio = clips.some((c) => c.src?.hasAudio)
 
   // ---- Luu / Mo du an ----
-  function buildProject() {
-    const legacyAudioItems = getProjectAudioItems()
-    return normalizeProject({
-      version: 4, projectId: projectIdRef.current, captionTimebase, ratio, filterKey, filterIntensity, mode, captions, burnCaptions, overlays, videoOverlays, assets: libraryAssets,
-      audioItems: legacyAudioItems, transition, transitionStyle, transitionDuration,
-      clips: clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
-      music, voice, musicVol, voiceVol, ducking, bgDur, voiceDur, voiceOffset, origVolume, bgLoop, syncMode, slideDur,
-      ttsEngine, ttsVoice, ttsRate, ttsPitch, aiEdited, keepSegments, autoCut, autoInfo, silenceParams
-    })
+  // Truong cua mot timeline o dang luu file; `src` la state dang mo hoac snapshot cua tab khac
+  function timelineContent(src) {
+    return {
+      captionTimebase: src.captionTimebase, ratio: src.ratio, filterKey: src.filterKey, filterIntensity: src.filterIntensity, mode: src.mode,
+      captions: src.captions, burnCaptions: src.burnCaptions, overlays: src.overlays, videoOverlays: src.videoOverlays,
+      audioItems: src.audioItems, tracks: src.tracks, transition: src.transition, transitionStyle: src.transitionStyle, transitionDuration: src.transitionDuration,
+      clips: src.clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
+      ducking: src.ducking, origVolume: src.origVolume, syncMode: src.syncMode, slideDur: src.slideDur,
+      ttsEngine: src.ttsEngine, ttsVoice: src.ttsVoice, ttsRate: src.ttsRate, ttsPitch: src.ttsPitch,
+      aiEdited: src.aiEdited, keepSegments: src.keepSegments, autoCut: src.autoCut, autoInfo: src.autoInfo, silenceParams: src.silenceParams
+    }
   }
-  function getProjectAudioItems() {
-    const legacyAudioItems = [
-      ...(music?.path ? [{ id: 'legacy-music', path: music.path, name: music.name, track: 'music', start: 0, in: 0,
-        out: Math.max(0.001, bgDur), gain: musicVol, loop: bgLoop }] : []),
-      ...(voice?.path ? [{ id: 'legacy-voice', path: voice.path, name: voice.name, track: 'voice', start: voiceOffset, in: 0,
-        out: Math.max(0.001, voiceDur), gain: voiceVol }] : [])
-    ]
-    return [...legacyAudioItems, ...audioItems]
+  function buildProject() {
+    const live = timelineContent({
+      captionTimebase, ratio, filterKey, filterIntensity, mode, captions, burnCaptions, overlays, videoOverlays, audioItems, tracks, transition, transitionStyle, transitionDuration,
+      clips, ducking, origVolume, syncMode, slideDur, ttsEngine, ttsVoice, ttsRate, ttsPitch, aiEdited, keepSegments, autoCut, autoInfo, silenceParams
+    })
+    return normalizeProject({
+      version: 6, projectId: projectIdRef.current, assets: libraryAssets, activeTimelineId,
+      timelines: timelines.map((entry) => ({ id: entry.id, name: entry.name, ...(entry.id !== activeTimelineId && entry.snap ? timelineContent(entry.snap) : live) }))
+    })
   }
   useEffect(() => {
     if (savedProjectSerialized == null) setSavedProjectSerialized(serializedProject)
@@ -1897,38 +2399,49 @@ export default function App() {
     editRevisionRef.current++
     const loadRevision = editRevisionRef.current
     const project = normalizeProject(data)
-    const built = []
-    for (const c of project.clips) {
-      let m = null
-      try {
-        m = await window.taoclip.probe(c.path)
-      } catch (e) { /* Keep missing assets in their original timeline position. */ }
-      if (c.kind === 'image') {
-        built.push({ id: c.id, kind: 'image', path: c.path, name: c.name, animated: c.animated, missing: !m, src: { duration: c.out, width: m?.width || 0, height: m?.height || 0, hasAudio: false, isImage: true, rotation: m?.rotation || 0 }, in: 0, out: c.out, speed: 1, kenBurns: c.kenBurns !== false, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: m ? [c.path] : [] })
-      } else {
-        built.push({ id: c.id, path: c.path, name: c.name, missing: !m, src: m || { duration: c.out, width: 0, height: 0, hasAudio: false }, in: c.in, out: c.out, speed: c.speed, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: [] })
-      }
+    // Moi file media chi probe mot lan du nhieu timeline cung dung
+    const probes = new Map()
+    const probeOnce = (mediaPath) => {
+      if (!probes.has(mediaPath)) probes.set(mediaPath, window.taoclip.probe(mediaPath).catch(() => null))
+      return probes.get(mediaPath).then((media) => (media ? { ...media } : null))
     }
-    const loadedVideoOverlays = await Promise.all(project.videoOverlays.map(async (item) => {
-      if (item.sticker) return { ...item, missing: false }
-      try { await window.taoclip.probe(item.path); return { ...item, missing: false } }
-      catch { return { ...item, missing: true } }
-    }))
-    const loadedAudioItems = await Promise.all(project.audioItems.map(async (item) => {
-      try { await window.taoclip.probe(item.path); return { ...item, missing: false } }
-      catch { return { ...item, missing: true } }
-    }))
-    const loadedTracks = await Promise.all([project.music, project.voice].filter((item) => item?.path).map(async (item) => {
-      try { await window.taoclip.inspectMedia(item.path); return { path: item.path, missing: false } }
-      catch { return { path: item.path, missing: true } }
-    }))
-    const referencedAssets = [
-      ...built.map((item) => ({ path: item.path, missing: item.missing, metadata: item.src })),
-      ...loadedVideoOverlays.filter((item) => !item.sticker).map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
-      ...loadedAudioItems.map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
-      ...(project.music?.path ? [{ path: project.music.path, missing: loadedTracks.find((item) => normalizeMediaPath(item.path) === normalizeMediaPath(project.music.path))?.missing ?? true, metadata: { duration: project.bgDur } }] : []),
-      ...(project.voice?.path ? [{ path: project.voice.path, missing: loadedTracks.find((item) => normalizeMediaPath(item.path) === normalizeMediaPath(project.voice.path))?.missing ?? true, metadata: { duration: project.voiceDur } }] : [])
-    ]
+    const loadTimeline = async (timeline) => {
+      const built = []
+      for (const c of timeline.clips) {
+        const m = await probeOnce(c.path) // thieu file: giu clip nguyen vi tri, danh dau missing
+        if (c.kind === 'image') {
+          built.push({ id: c.id, kind: 'image', path: c.path, name: c.name, animated: c.animated, missing: !m, src: { duration: c.out, width: m?.width || 0, height: m?.height || 0, hasAudio: false, isImage: true, rotation: m?.rotation || 0 }, in: 0, out: c.out, speed: 1, kenBurns: c.kenBurns !== false, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: m ? [c.path] : [] })
+        } else {
+          built.push({ id: c.id, path: c.path, name: c.name, missing: !m, src: m || { duration: c.out, width: 0, height: 0, hasAudio: false }, in: c.in, out: c.out, speed: c.speed, audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: [] })
+        }
+      }
+      const loadedVideoOverlays = await Promise.all(timeline.videoOverlays.map(async (item) => (item.sticker ? { ...item, missing: false } : { ...item, missing: !(await probeOnce(item.path)) })))
+      const loadedAudioItems = await Promise.all(timeline.audioItems.map(async (item) => ({ ...item, missing: !(await probeOnce(item.path)) })))
+      let loadedCaptions = timeline.captions
+      let loadedTimebase = timeline.captionTimebase
+      if (loadedTimebase === 'source-legacy' && built.length === 1) {
+        const plan = buildTimelinePlan(built)
+        loadedCaptions = loadedCaptions.flatMap((caption) => {
+          const ranges = mapSourceRange(plan, built[0].id, caption.start, caption.end)
+          return ranges.length
+            ? ranges.map((range) => ({ ...caption, ...range, unmapped: false }))
+            : [{ ...caption, unmapped: true }]
+        })
+        loadedTimebase = 'timeline'
+      }
+      const silence = timeline.silenceParams || (timeline.autoInfo?.options ? {
+        threshold: Number.parseFloat(timeline.autoInfo.options.noise) || -30,
+        minSilence: timeline.autoInfo.options.minSilence ?? 0.4, pad: timeline.autoInfo.options.pad ?? 0.06
+      } : { threshold: -30, minSilence: 0.4, pad: 0.06 })
+      return { timeline, clips: built, videoOverlays: loadedVideoOverlays, audioItems: loadedAudioItems, captions: loadedCaptions, captionTimebase: loadedTimebase, silenceParams: silence }
+    }
+    const loaded = []
+    for (const timeline of project.timelines) loaded.push(await loadTimeline(timeline))
+    const referencedAssets = loaded.flatMap((entry) => [
+      ...entry.clips.map((item) => ({ path: item.path, missing: item.missing, metadata: item.src })),
+      ...entry.videoOverlays.filter((item) => !item.sticker).map((item) => ({ path: item.path, missing: item.missing, metadata: item })),
+      ...entry.audioItems.map((item) => ({ path: item.path, missing: item.missing, metadata: item }))
+    ])
     const loadedLibraryAssets = await Promise.all(project.assets.map(async (asset) => {
       const reference = referencedAssets.find((item) => normalizeMediaPath(item.path) === normalizeMediaPath(asset.path))
       if (reference) return { ...asset, missing: !!reference.missing, metadata: asset.metadata || reference.metadata || null }
@@ -1943,48 +2456,133 @@ export default function App() {
     asyncResourceGuardRef.current.invalidateAll()
     editRevisionRef.current++
     projectIdRef.current = project.projectId
+    const open = loaded.find((entry) => entry.timeline.id === project.activeTimelineId) || loaded[0]
+    const tl = open.timeline
+    const built = open.clips
     setHist([]); setFuture([])
     setLibraryAssets(loadedLibraryAssets)
+    // Tab khac giu snapshot san de doi tab tuc thi (khong probe lai)
+    setTimelines(loaded.map((entry) => ({
+      id: entry.timeline.id, name: entry.timeline.name, hist: [], future: [],
+      snap: entry === open ? null : {
+        selectedClipId: null, selectedOverlayId: null, activeClipId: null, activeClipIndex: 0,
+        clips: snapshotHistoryClips(entry.clips), libraryAssets: loadedLibraryAssets, overlays: entry.timeline.overlays, videoOverlays: entry.videoOverlays,
+        audioItems: entry.audioItems, tracks: entry.timeline.tracks, captions: entry.captions, captionTimebase: entry.captionTimebase,
+        ratio: entry.timeline.ratio, filterKey: entry.timeline.filterKey, filterIntensity: entry.timeline.filterIntensity, mode: entry.timeline.mode,
+        transition: entry.timeline.transition, transitionStyle: entry.timeline.transitionStyle, transitionDuration: entry.timeline.transitionDuration, burnCaptions: entry.timeline.burnCaptions,
+        origVolume: entry.timeline.origVolume, ducking: entry.timeline.ducking, syncMode: entry.timeline.syncMode, slideDur: entry.timeline.slideDur,
+        ttsEngine: entry.timeline.ttsEngine, ttsVoice: entry.timeline.ttsVoice, ttsRate: entry.timeline.ttsRate, ttsPitch: entry.timeline.ttsPitch,
+        keepSegments: entry.timeline.keepSegments, autoCut: entry.timeline.autoCut, autoInfo: entry.timeline.autoInfo, aiEdited: entry.timeline.aiEdited,
+        silenceParams: entry.silenceParams
+      }
+    })))
+    setActiveTimelineId(tl.id); setRenamingTabId(null)
     setClips(built); setSelId(built[0]?.id || null); setActiveIdx(0); setCurrent(0)
-    setRatio(project.ratio); setFilterKey(project.filterKey); setFilterIntensity(project.filterIntensity); setMode(project.mode); setTransitionDuration(project.transitionDuration)
-    let loadedCaptions = project.captions
-    let loadedTimebase = project.captionTimebase
-    if (loadedTimebase === 'source-legacy' && built.length === 1) {
-      const plan = buildTimelinePlan(built)
-      loadedCaptions = loadedCaptions.flatMap((caption) => {
-        const ranges = mapSourceRange(plan, built[0].id, caption.start, caption.end)
-        return ranges.length
-          ? ranges.map((range) => ({ ...caption, ...range, unmapped: false }))
-          : [{ ...caption, unmapped: true }]
-      })
-      loadedTimebase = 'timeline'
-    }
-    setCaptions(loadedCaptions); setCaptionTimebase(loadedTimebase); setBurnCaptions(project.burnCaptions)
-    setOverlays(project.overlays); setSelOv(null); setTransition(project.transition); setTransitionStyle(project.transitionStyle)
-    setVideoOverlays(loadedVideoOverlays); setAudioItems(loadedAudioItems)
-    // v2: music/voice rieng; v1 (cu): bgAudio 1 track kind music|tts
-    const m = project.music, vo = project.voice
-    commitMusic(m); commitVoice(vo); setMusicVol(project.musicVol); setVoiceVol(project.voiceVol); setDucking(project.ducking)
-    setBgDur(project.bgDur); setVoiceDur(project.voiceDur); setVoiceOffset(project.voiceOffset)
-    setOrigVolume(project.origVolume); setBgLoop(project.bgLoop)
-    setSyncMode(project.syncMode); setSlideDur(project.slideDur)
-    setKeepSegments(project.keepSegments); setAutoCut(project.autoCut); setAutoInfo(project.autoInfo)
-    setSilenceParams(project.silenceParams || (project.autoInfo?.options ? {
-      threshold: Number.parseFloat(project.autoInfo.options.noise) || -30,
-      minSilence: project.autoInfo.options.minSilence ?? 0.4, pad: project.autoInfo.options.pad ?? 0.06
-    } : { threshold: -30, minSilence: 0.4, pad: 0.06 }))
-    setTtsEngine(project.ttsEngine); setTtsVoice(project.ttsVoice); setTtsRate(project.ttsRate); setTtsPitch(project.ttsPitch)
-    setAiEdited(project.aiEdited)
+    setRatio(tl.ratio); setFilterKey(tl.filterKey); setFilterIntensity(tl.filterIntensity); setMode(tl.mode); setTransitionDuration(tl.transitionDuration)
+    setCaptions(open.captions); setCaptionTimebase(open.captionTimebase); setBurnCaptions(tl.burnCaptions)
+    setOverlays(tl.overlays); setSelOv(null); setTransition(tl.transition); setTransitionStyle(tl.transitionStyle)
+    setVideoOverlays(open.videoOverlays); setAudioItems(open.audioItems); setTracks(tl.tracks); setSelItem(null)
+    setDucking(tl.ducking)
+    setOrigVolume(tl.origVolume)
+    setSyncMode(tl.syncMode); setSlideDur(tl.slideDur)
+    setKeepSegments(tl.keepSegments); setAutoCut(tl.autoCut); setAutoInfo(tl.autoInfo)
+    setSilenceParams(open.silenceParams)
+    setTtsEngine(tl.ttsEngine); setTtsVoice(tl.ttsVoice); setTtsRate(tl.ttsRate); setTtsPitch(tl.ttsPitch)
+    setAiEdited(tl.aiEdited)
     setProjectPath(filePath)
     pendingProjectCleanRef.current = clean
     built.filter((c) => !isImg(c)).forEach((c) => {
       loadThumbnails(c.id, c.path)
       loadWave(c.id, c.path, c.src.hasAudio)
     })
-    setMusicWave(null); setVoiceWave(null)
-    if (m) loadTrackWave('music', m.path)
-    if (vo) loadTrackWave('voice', vo.path)
   }
+
+  // ---- Nhieu timeline (tab) ----
+  const timelineBusy = exporting || importing || busy || capBusy || ttsBusy || redubBusy || aiBusy || faceBusy || dlBusy || collectingProject
+  // Timeline moi: rong, nhung ke thua ti le + cai dat dau ra + giong doc cua tab dang mo
+  function blankTimelineSnapshot() {
+    return {
+      selectedClipId: null, selectedOverlayId: null, activeClipId: null, activeClipIndex: 0,
+      clips: [], libraryAssets: libraryAssetsRef.current, overlays: [], videoOverlays: [], audioItems: [], tracks: defaultTracks(), captions: [], captionTimebase: 'timeline',
+      ratio, filterKey: 'none', filterIntensity: 100, mode, transition, transitionStyle, transitionDuration, burnCaptions,
+      origVolume: 1, ducking, syncMode, slideDur, ttsEngine, ttsVoice, ttsRate, ttsPitch,
+      keepSegments: null, autoCut: false, autoInfo: null, aiEdited: false, silenceParams: { threshold: -30, minSilence: 0.4, pad: 0.06 }
+    }
+  }
+  // Doi sang tab `toId` (hoac them tab `add` roi mo no; `dropId`: bo tab nay khi roi di). Tab dang mo luu snapshot + lich su vao danh sach.
+  function switchTimeline(toId, { add = null, dropId = null } = {}) {
+    if (toId === activeTimelineId) return true
+    const target = add || timelines.find((entry) => entry.id === toId)
+    if (!target?.snap) return false
+    if (timelineBusy) { notify(t('tltab_busy'), 'err'); return false }
+    endHistoryEdit()
+    // Ket qua cua cac tac vu dang bay thuoc ve tab cu: huy nhu khi mo du an khac
+    resourceScopeRef.current++
+    asyncResourceGuardRef.current.invalidateAll()
+    editRevisionRef.current++
+    const leaving = snapshot()
+    const leavingHist = hist, leavingFuture = future
+    setTimelines((list) => (add ? [...list, add] : list)
+      .filter((entry) => entry.id !== dropId)
+      .map((entry) => entry.id === activeTimelineId ? { ...entry, snap: leaving, hist: leavingHist, future: leavingFuture }
+        : entry.id === toId ? { ...entry, snap: null, hist: [], future: [] } : entry))
+    restore({ ...target.snap, libraryAssets: libraryAssetsRef.current })
+    setHist(target.hist); setFuture(target.future)
+    setActiveTimelineId(toId); setRenamingTabId(null); setCtxMenu(null)
+    setPlaying(false); curRef.current = 0; setCurrent(0); setActiveIdx(0); setExactFilterPreview('')
+    return true
+  }
+  function addTimeline() {
+    if (timelines.length >= MAX_TIMELINES) { notify(t('tltab_limit', { n: MAX_TIMELINES }), 'err'); return }
+    const entry = { id: makeEntityId('timeline'), name: nextTimelineName(timelines), snap: blankTimelineSnapshot(), hist: [], future: [] }
+    switchTimeline(entry.id, { add: entry })
+  }
+  function duplicateTimeline(id) {
+    if (timelines.length >= MAX_TIMELINES) { notify(t('tltab_limit', { n: MAX_TIMELINES }), 'err'); return }
+    const source = timelines.find((entry) => entry.id === id)
+    if (!source) return
+    const copied = JSON.parse(JSON.stringify(id === activeTimelineId ? snapshot() : source.snap))
+    const entry = { id: makeEntityId('timeline'), name: copyTimelineName(timelines, source.name), hist: [], future: [],
+      snap: { ...copied, selectedClipId: null, selectedOverlayId: null, libraryAssets: libraryAssetsRef.current } }
+    switchTimeline(entry.id, { add: entry })
+  }
+  function renameTimeline(id, value) {
+    setTimelines((list) => list.map((entry) => entry.id === id ? { ...entry, name: cleanTimelineName(value, entry.name) } : entry))
+  }
+  function removeTimeline(id) {
+    if (timelines.length <= 1) return
+    const entry = timelines.find((item) => item.id === id)
+    if (!entry) return
+    const content = id === activeTimelineId ? { clips, videoOverlays, audioItems, overlays, captions } : entry.snap
+    const hasContent = !!(content.clips.length || content.videoOverlays.length || content.audioItems.length || content.overlays.length || content.captions.length)
+    if (hasContent && !window.confirm(t('tltab_delete_confirm', { name: entry.name }))) return
+    if (id === activeTimelineId) { switchTimeline(activeAfterRemove(timelines, id, id), { dropId: id }); return }
+    setTimelines((list) => list.filter((item) => item.id !== id))
+  }
+  function shiftTimeline(id, delta) {
+    setTimelines((list) => moveTimeline(list, id, list.findIndex((entry) => entry.id === id) + delta))
+  }
+  function openTabMenu(event, id) {
+    setCtxMenu({ x: event.clientX, y: event.clientY, target: { kind: 'tab', id } })
+  }
+  function buildTabMenuItems(id) {
+    const index = timelines.findIndex((entry) => entry.id === id)
+    if (index < 0) return []
+    const entry = (itemId, labelKey, icon, run, extra = {}) => ({ id: itemId, label: t(labelKey), icon, run, ...extra })
+    return [
+      entry('tab-rename', 'tltab_rename', <Pencil size={14} />, () => setRenamingTabId(id)),
+      entry('tab-duplicate', 'tltab_duplicate', <CopyPlus size={14} />, () => duplicateTimeline(id), { disabled: timelines.length >= MAX_TIMELINES }),
+      entry('tab-left', 'tltab_left', <ChevronLeft size={14} />, () => shiftTimeline(id, -1), { disabled: index === 0 }),
+      entry('tab-right', 'tltab_right', <ChevronRight size={14} />, () => shiftTimeline(id, 1), { disabled: index === timelines.length - 1 }),
+      { separator: true },
+      entry('tab-delete', 'tltab_delete', <Trash2 size={14} />, () => removeTimeline(id), { danger: true, disabled: timelines.length <= 1 })
+    ]
+  }
+  const timelineTabs = timelines.map((entry) => ({
+    id: entry.id, name: entry.name,
+    duration: entry.id === activeTimelineId || !entry.snap ? totalDuration : approxTimelineDuration(entry.snap)
+  }))
+
   async function openProject() {
     const scope = resourceScopeRef.current
     const projectAtDialogOpen = JSON.stringify(buildProject())
@@ -2005,7 +2603,7 @@ export default function App() {
       if (p) {
         if (resourceScopeRef.current !== scope) { notify(t('msg_snapshot_saved', { p }), 'ok'); return }
         setProjectPath(p)
-        setSavedProjectSerialized(JSON.stringify(data))
+        setSavedProjectSerialized(projectKey(data))
         const latest = await window.taoclip.latestRecovery?.()
         if (latest?.project?.projectId === projectIdRef.current) await window.taoclip.dismissRecovery?.(projectIdRef.current, latest.revision)
         setStatus('💾 ' + p); notify('💾 ' + p.split(/[\\/]/).pop(), 'ok', { label: t('open_folder'), run: () => window.taoclip.showInFolder(p) })
@@ -2020,7 +2618,7 @@ export default function App() {
       if (!p) return
       if (resourceScopeRef.current !== scope) { notify(t('msg_snapshot_saved', { p }), 'ok'); return }
       setProjectPath(p)
-      setSavedProjectSerialized(JSON.stringify(data))
+      setSavedProjectSerialized(projectKey(data))
       const latest = await window.taoclip.latestRecovery?.()
       if (latest?.project?.projectId === projectIdRef.current) await window.taoclip.dismissRecovery?.(projectIdRef.current, latest.revision)
       setStatus('💾 ' + p); notify('💾 ' + p.split(/[\\/]/).pop(), 'ok', { label: t('open_folder'), run: () => window.taoclip.showInFolder(p) })
@@ -2105,8 +2703,6 @@ export default function App() {
       } : item))
       setVideoOverlays((items) => items.map((item) => normalizeMediaPath(item.path) === oldKey ? { ...item, path, name, missing: false, sourceDuration: metadata.duration || item.sourceDuration } : item))
       setAudioItems((items) => items.map((item) => normalizeMediaPath(item.path) === oldKey ? { ...item, path, name, missing: false, sourceDuration: metadata.duration || item.sourceDuration } : item))
-      if (normalizeMediaPath(music?.path) === oldKey) commitMusic({ ...music, path, name })
-      if (normalizeMediaPath(voice?.path) === oldKey) commitVoice({ ...voice, path, name })
       if (asset.kind === 'video') {
         clips.filter((item) => item.path === sourcePath).forEach((item) => {
           loadThumbnails(item.id, path, item.id === selId ? 100 : 0)
@@ -2121,7 +2717,9 @@ export default function App() {
   async function handleExport() {
     if (!clips.length) return
     if (clips.some((clip) => clip.missing)) { notify(t('media_missing'), 'err'); return }
-    const out = await window.taoclip.saveVideo('taoclip-export.mp4'); if (!out) return
+    // Nhieu timeline: ten file mac dinh theo ten tab de xuat tung tap khong bi lan
+    const tabName = timelines.length > 1 ? timelines.find((entry) => entry.id === activeTimelineId)?.name : ''
+    const out = await window.taoclip.saveVideo(tabName ? `${tabName.replace(/[\\/:*?"<>|]/g, '_')}.mp4` : 'taoclip-export.mp4'); if (!out) return
     setExporting(true); setProgress(0); setExpStage('core')
     const ratios = [ratio, ...extraRatios.filter((r) => r !== ratio)]
     let segments
@@ -2129,7 +2727,7 @@ export default function App() {
       const c = clips[0]
       segments = keepSegments.map((s) => ({ start: Math.max(s.start, c.in), end: Math.min(s.end, c.out) })).filter((s) => s.end - s.start > 0.05)
     }
-    const clipPayload = clips.map((c) => ({ input: c.path, kind: c.kind || 'video', in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode || 'fit', cropX: c.cropX ?? 0.5, cropY: c.cropY ?? 0.5, formatName: c.src?.formatName, hasAudio: !!c.src?.hasAudio }))
+    const clipPayload = clips.map((c) => ({ input: c.path, kind: c.kind || 'video', audioDetached: !!c.audioDetached, audioMuted: !!c.audioMuted, enhance: !!c.enhance, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode || 'fit', cropX: c.cropX ?? 0.5, cropY: c.cropY ?? 0.5, formatName: c.src?.formatName, hasAudio: !!c.src?.hasAudio && !c.audioDetached && !c.audioMuted }))
     try {
       for (let i = 0; i < ratios.length; i++) {
         const r = ratios[i]
@@ -2143,13 +2741,11 @@ export default function App() {
           jobId, clips: clipPayload, editPlan: toExportSegments(timelinePlan), output: o, ratio: r, mode, filterKey, filterIntensity, segments,
           captions, burnCaptions: burnCaptions && captions.length > 0,
           overlays: overlays.map((o) => ({ type: o.type, text: o.text, start: o.start, end: o.end, x: o.x, y: o.y, size: o.size, color: o.type === 'text' ? o.color : null, align: o.align || 'center', zIndex: o.zIndex || 0 })),
-          videoOverlays: videoOverlays.map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker }) => ({
+          videoOverlays: withLayerZIndex(videoOverlays, tracks).filter((item) => visibleVideoIds.has(item.trackId)).map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker }) => ({
             path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker
           })),
-          music: music ? { path: music.path, volume: musicVol, loop: bgLoop } : undefined,
-          voice: voice ? { path: voice.path, volume: voiceVol, offset: voiceOffset } : undefined,
-          audioItems: getProjectAudioItems(),
-          origVolume, ducking, aiEdited,
+          audioItems: audioItems.filter((item) => audibleIds.has(item.trackId)),
+          origVolume: effOrigVolume, ducking, aiEdited,
           captionTimebase,
           useGpu, quality, resolution, transition: clips.length > 1 && transition !== 'none'
             ? { type: transition === 'cross' ? 'crossfade' : 'fade', dur: transitionDuration, style: transitionStyle } : undefined
@@ -2166,9 +2762,8 @@ export default function App() {
   }
   function toggleExtra(r) { setExtraRatios((arr) => arr.includes(r) ? arr.filter((x) => x !== r) : [...arr, r]) }
 
-  const tlWidth = Math.max(totalDuration * pps, 400)
   const ticks = []
-  if (totalDuration) { const step = pps < 50 ? 5 : pps < 120 ? 2 : 1; for (let s = 0; s <= totalDuration; s += step) ticks.push(s) }
+  if (totalDuration) { const step = tickStep(pps); for (let s = 0; s <= totalDuration; s += step) ticks.push(s) }
   const hasClips = clips.length > 0
 
   return (
@@ -2211,19 +2806,16 @@ export default function App() {
               activeCaption={activeCaption} genCaptions={genCaptions} editCaption={editCaption} updateCaption={updateCaption}
               splitCaption={splitCaption} mergeCaption={mergeCaption} canMergeCaption={canMergeCaptions} importSrt={importSrt} exportSrt={exportSrt}
               captionAudioSource={captionAudioSource} setCaptionAudioSource={setCaptionAudioSource}
-              hasVoiceTracks={getProjectAudioItems().some((item) => item.track === 'voice')} canvasDuration={totalDuration} delCaption={delCaption}
+              hasVoiceTracks={audioItems.some((item) => item.track === 'voice')} canvasDuration={totalDuration} delCaption={delCaption}
               overlays={overlays} selOv={selOv} setSelOv={setSelOv} addText={addText}
               updateOverlay={updateOverlay} delOverlay={delOverlay} moveOverlayLayer={moveOverlayLayer} setOverlayBoundaryAtPlayhead={setOverlayBoundaryAtPlayhead} seekGlobal={seekGlobal} current={current}
               beginEdit={beginHistoryEdit} endEdit={endHistoryEdit} pushHistory={pushHistory} />
           ) : tab === 'audio' ? (
             <AudioTab hasClips={hasClips} anyAudio={anyAudio} imageCount={imageCount}
-              syncMode={syncMode} setSyncMode={changeSyncMode} bgDur={bgDur} setSlideDur={changeSlidePreset} setAllSlideDur={setAllSlideDur}
+              syncMode={syncMode} setSyncMode={changeSyncMode} setSlideDur={changeSlidePreset} setAllSlideDur={setAllSlideDur}
               fitSlideDuration={fitSlideDuration} fitMusicDuration={fitMusicDuration} hasFitMusic={hasFitMusic} timelineDuration={totalDuration}
-              music={music} setMusic={(m) => { pushHistory(); commitMusic(m); if (!m) setBgDur(0) }}
-              voice={voice} setVoice={(v) => { pushHistory(); commitVoice(v); if (!v) { setVoiceDur(0); setVoiceOffset(0) } }}
               audioItems={audioItems} addAudioItems={addAudioItems} updateAudioItem={updateAudioItem} removeAudioItem={removeAudioItem}
-              musicVol={musicVol} setMusicVol={setMusicVol} voiceVol={voiceVol} setVoiceVol={setVoiceVol}
-              origVolume={origVolume} setOrigVolume={setOrigVolume} bgLoop={bgLoop} setBgLoop={setBgLoop}
+              origVolume={origVolume} setOrigVolume={setOrigVolume}
               ducking={ducking} setDucking={setDucking} importMusic={importMusic}
               ttsText={ttsText} setTtsText={setTtsText} ttsBusy={ttsBusy} ttsStatus={ttsStatus}
               ttsEngine={ttsEngine} setTtsEngine={(v) => { if (v !== ttsEngine) { pushHistory(); setTtsEngine(v) } }} ttsVoice={ttsVoice} setTtsVoice={(v) => { if (v !== ttsVoice) { pushHistory(); setTtsVoice(v) } }}
@@ -2246,7 +2838,7 @@ export default function App() {
               faceBusy={faceBusy} faceStatus={faceStatus} cancelFaceOperation={cancelFaceOperation} applyFaceSwap={applyFaceSwap} previewFaceSwap={previewFaceSwap} facePreviewPath={facePreviewPath} pickFaceImage={pickFaceImage} />
           ) : tab === 'sticker' ? (
             <StickerTab hasClips={hasClips} overlays={overlays} selOv={selOv} setSelOv={setSelOv}
-              addSticker={addStickerToV2} videoOverlays={videoOverlays} updateVideoOverlay={updateVideoOverlay} delVideoOverlay={delVideoOverlay}
+              addSticker={addStickerToV2} videoOverlays={videoOverlays} updateVideoOverlay={updateVideoOverlay} delVideoOverlay={removeVideoOverlay}
               updateOverlay={updateOverlay} delOverlay={delOverlay} moveOverlayLayer={moveOverlayLayer} setOverlayBoundaryAtPlayhead={setOverlayBoundaryAtPlayhead} seekGlobal={seekGlobal} current={current}
               beginEdit={beginHistoryEdit} endEdit={endHistoryEdit} pushHistory={pushHistory} />
           ) : tab === 'trans' ? (
@@ -2267,8 +2859,8 @@ export default function App() {
                 {activeClip.missing
                   ? <div className="cc-missing">{t('media_missing')}<small>{activeClip.path}</small><button className="cc-import" onClick={() => relinkMissingClip(activeClip.id)}>{t('media_relink')}</button></div>
                   : videoSrc
-                  ? <video ref={videoRef} src={videoSrc} preload="auto" playsInline onLoadedMetadata={onLoadedMeta} onCanPlay={onPreviewCanPlay} onError={onPreviewVideoError} onTimeUpdate={onTimeUpdate} onClick={togglePlay} style={{ ...previewCropStyle, filter: filter.css, opacity: mainPreviewOpacity }} />
-                  : <img className={`cc-slide ${activeClip.kenBurns !== false ? 'kb' : ''}`} src={imageSrc} alt="" draggable={false} onLoad={onPreviewImageLoad} onError={onPreviewImageError} onClick={togglePlay} style={{ ...previewCropStyle, filter: filter.css, opacity: mainPreviewOpacity }} />}
+                  ? <video ref={videoRef} src={videoSrc} preload="auto" playsInline onLoadedMetadata={onLoadedMeta} onCanPlay={onPreviewCanPlay} onError={onPreviewVideoError} onTimeUpdate={onTimeUpdate} onClick={togglePlay} style={{ ...previewCropStyle, filter: mainFilterCss, opacity: mainPreviewOpacity }} />
+                  : <img className={`cc-slide ${activeClip.kenBurns !== false ? 'kb' : ''}`} src={imageSrc} alt="" draggable={false} onLoad={onPreviewImageLoad} onError={onPreviewImageError} onClick={togglePlay} style={{ ...previewCropStyle, filter: mainFilterCss, opacity: mainPreviewOpacity }} />}
                 {overlapPreview && (() => {
                   const other = activeClip?.id === overlapPreview.incoming.clipId ? overlapPreview.outgoing : overlapPreview.incoming
                   const otherClip = activeClip?.id === overlapPreview.incoming.clipId ? overlapPreview.outgoingClip : overlapPreview.incomingClip
@@ -2308,9 +2900,7 @@ export default function App() {
                 </div>
               </div>
             )}
-            {music && <audio ref={musicRef} src={fileUrl(music.path)} loop={bgLoop} preload="auto" />}
-            {voice && <audio ref={voiceRef} src={fileUrl(voice.path)} preload="auto" />}
-            {audioItems.map((item) => <AudioItemPreview key={item.id} item={item} current={current} playing={playing} totalDuration={totalDuration} />)}
+            {audioItems.map((item) => <AudioItemPreview key={item.id} item={item} current={current} playing={playing} totalDuration={totalDuration} audible={audibleIds.has(item.trackId)} />)}
           </div>
           <div className="cc-pctrl">
             <span className="t">{fmt(current)}</span>
@@ -2342,119 +2932,31 @@ export default function App() {
           onPreviewSilence={previewSilenceAt} />
       </div>
 
-      <div className="cc-tl" style={{ height: tlH }}>
-        <div className="rsz h" onMouseDown={(e) => startPanelResize('tl', e)} />
-        <div className="cc-tlbar">
-          <button className="tb-ic" onClick={splitAtPlayhead} disabled={!hasClips} title={t('tb_split_tip')}><Scissors size={14} /> {t('tb_split')}</button>
-          <button className="tb-ic" onClick={() => setSnapEnabled((value) => !value)} title={t('snap_tip')}
-            style={snapEnabled ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}>{t(snapEnabled ? 'snap_on' : 'snap_off')}</button>
-          <button onClick={undo} disabled={!hist.length} title={t('undo')}><Undo2 size={14} /></button>
-          <button onClick={redo} disabled={!future.length} title={t('redo')}><Redo2 size={14} /></button>
-          <button onClick={() => setShowKeys(true)} title={t('keys_btn')}><Keyboard size={14} /></button>
-          <div className="sp" />
-          <span className="cur">{fmt(current)} / {fmt(totalDuration)}</span>
-          <div className="zoom">
-            <button onClick={() => setPps((p) => Math.max(20, p - 20))} title={t('zoom_out')}><Minus size={14} /></button>
-            <button onClick={fitZoom} title={t('fit')}>{t('fit')}</button>
-            <button onClick={() => setPps((p) => Math.min(300, p + 20))} title={t('zoom_in')}><Plus size={14} /></button>
-          </div>
-        </div>
+      <Timeline
+        tlH={tlH} onResizePanel={(e) => startPanelResize('tl', e)} overlayThumbs={overlayThumbs} laneDrag={laneDrag} onStartClipAudioDrag={startClipAudioDrag}
+        tabs={<TimelineTabs tabs={timelineTabs} activeId={activeTimelineId} renamingId={renamingTabId}
+          onRenameStart={setRenamingTabId} onRenameEnd={() => setRenamingTabId(null)} onRename={renameTimeline}
+          onSelect={(id) => switchTimeline(id)} onAdd={addTimeline} onClose={removeTimeline} onContextMenu={openTabMenu}
+          canAdd={timelines.length < MAX_TIMELINES} />}
+        tracks={tracks} onTrackPatch={patchTrack} onAddTrack={addTrack} onRemoveTrack={removeTrack}
+        layout={layout} selId={selId} onSelectClip={selectClip} videoOverlays={videoOverlays} audioItems={audioItems} overlays={overlays}
+        selOv={selOv} selItem={selItem} onSelectItem={selectItem}
+        pps={pps} scrollRef={scrollRef} totalDuration={totalDuration} current={current} ticks={ticks} dragInsert={dragInsert} hasClips={hasClips}
+        snapEnabled={snapEnabled} onToggleSnap={() => setSnapEnabled((value) => !value)} canUndo={hist.length > 0} canRedo={future.length > 0}
+        onUndo={undo} onRedo={redo} onSplit={splitAtPlayhead} onShowKeys={() => setShowKeys(true)}
+        canDetach={!!selectedClip && !isImg(selectedClip) && !!selectedClip.src?.hasAudio && !selectedClip.audioDetached && !selectedClip.missing}
+        isDetached={!!selectedClip?.audioDetached} onDetachAudio={toggleDetachSelected}
+        onZoomOut={() => zoomBy(1 / ZOOM_STEP)} onZoomIn={() => zoomBy(ZOOM_STEP)} onFit={fitZoom}
+        onSeekClick={timelineClick} onStartScrub={startScrub} onStartTrim={startTrim} onStartReorder={startReorder}
+        onRetryWave={(id, mediaPath) => loadWave(id, mediaPath, true)} onSeek={seekGlobal}
+        onStartV2Move={startV2Move} onStartV2Resize={startV2Resize} onRemoveV2={removeVideoOverlay}
+        onStartAudioDrag={startAudioItemDrag} onRemoveAudio={removeAudioItem}
+        onStartOverlayMove={startOvMove} onStartOverlayResize={startOvResize} onItemContextMenu={openItemMenu} dragActive={dragOver} onLaneDrop={handleLaneDrop} />
 
-        <div className="cc-tlscroll" ref={scrollRef} onClick={timelineClick}>
-          <div className="cc-tlinner" style={{ width: tlWidth }}>
-            <div className="cc-ruler" onMouseDown={startScrub}>{ticks.map((s) => <span key={s} className="tick" style={{ left: s * pps }}>{fmt(s).slice(3, 5)}s</span>)}</div>
-            <div className="cc-track">
-              {layout.map((seg) => (
-                <div key={seg.key} className={`cc-clip ${selId === seg.id ? 'sel' : ''}`} style={{ left: seg.start * pps, width: (seg.end - seg.start) * pps }} onClick={(e) => { e.stopPropagation(); setSelId(seg.id); setSelOv(null); seekGlobal(clientXToTime(e.clientX)) }}>
-                  <div className="h l" onMouseDown={(e) => startTrim(seg.clip, 'l', e)} />
-                  <div className="strip" onMouseDown={(e) => startReorder(seg, e)} title={seg.clip.name}>{seg.clip.thumbs?.length ? seg.clip.thumbs.map((th, i) => <img key={i} src={fileUrl(th)} alt="" draggable={false} />) : <span className="cn">🎬 {seg.clip.name}</span>}</div>
-                  <div className="h r" onMouseDown={(e) => startTrim(seg.clip, 'r', e)} />
-                </div>
-              ))}
-            </div>
-            {videoOverlays.length > 0 && <div className="cc-track cc-v2-track">
-              <span className="cc-track-label">V2</span>
-              {videoOverlays.map((item) => {
-                const itemDuration = (item.out - item.in) / item.speed
-                const outside = item.start + itemDuration > totalDuration + FRAME
-                return <div key={item.id} className={`cc-v2-clip ${outside ? 'outside' : ''}`} title={`${item.name || item.path} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1')}` : ''}`}
-                style={{ left: item.start * pps, width: Math.max(24, ((item.out - item.in) / item.speed) * pps) }}
-                onMouseDown={(event) => startV2Move(item, event)} onClick={(event) => { event.stopPropagation(); seekGlobal(item.start) }}>
-                <span>{item.name || item.path.split(/[\\/]/).pop()}</span>
-                <button className="cc-v2-resize" onMouseDown={(event) => startV2Resize(item, event)} title={t('v2_resize_tip')} />
-                <button onClick={(event) => { event.stopPropagation(); pushHistory(); setVideoOverlays((items) => items.filter((candidate) => candidate.id !== item.id)) }} title={t('v2_remove_tip')}><X size={11} /></button>
-              </div>})}
-            </div>}
-            {anyAudio && (
-              <div className="cc-track audio">
-                {layout.map((seg) => seg.clip.src?.hasAudio && (
-                  <div key={seg.key} className="cc-aclip" style={{ left: seg.start * pps, width: (seg.end - seg.start) * pps }}>
-                    {seg.clip.wave
-                      ? <div className="wimg" style={{ backgroundImage: `url(${fileUrl(seg.clip.wave)})`, backgroundSize: `${seg.clip.src.duration * pps / (seg.clip.speed || 1)}px 100%`, backgroundPosition: `${-(seg.clip.in * pps / (seg.clip.speed || 1))}px 0` }} />
-                      : <div className="wave" />}
-                    {seg.clip.waveError && <button className="cc-wave-retry" title={t('media_retry')} onClick={(event) => { event.stopPropagation(); loadWave(seg.clip.id, seg.clip.path, true) }}>↻</button>}
-                    <span>{seg.clip.name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {music && (
-              <div className="cc-track music">
-                <div className="cc-mclip" style={{ width: Math.max((bgLoop ? (totalDuration || 0) : Math.min(bgDur || totalDuration || 0, totalDuration || 0)) * pps, 120) }} onClick={(e) => { e.stopPropagation(); setTab('audio') }} title={music.name}>
-                  {musicWave
-                    ? <div className="wimg rep" style={{ backgroundImage: `url(${fileUrl(musicWave)})`, backgroundSize: `${Math.max(20, (bgDur || 10) * pps)}px 100%` }} />
-                    : <div className="wave" />}<Music size={13} /><span>{music.name}</span>
-                  <button className="mclip-x" onClick={(e) => { e.stopPropagation(); pushHistory(); commitMusic(null); setBgDur(0) }} title={t('bg_remove')}><X size={12} /></button>
-                </div>
-              </div>
-            )}
-            {voice && (
-              <div className="cc-track music">
-                <div className="cc-vclip" style={{ left: voiceOffset * pps, width: Math.max((voiceDur || 2) * pps, 70) }}
-                  onMouseDown={startVoiceDrag} onClick={(e) => e.stopPropagation()} title={voice.name + ' — ' + fmt(voiceOffset)}>
-                  {voiceWave
-                    ? <div className="wimg" style={{ backgroundImage: `url(${fileUrl(voiceWave)})`, backgroundSize: `${Math.max(20, (voiceDur || 2) * pps)}px 100%` }} />
-                    : <div className="wave" />}<Mic size={13} /><span>{voice.name}</span>
-                  <button className="mclip-x" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); pushHistory(); commitVoice(null); setVoiceDur(0); setVoiceOffset(0) }} title={t('bg_remove')}><X size={12} /></button>
-                </div>
-              </div>
-            )}
-            {audioItems.map((item) => {
-              const itemDuration = item.loop ? Math.max(0, totalDuration - item.start) : item.out - item.in
-              const outside = !item.loop && item.start + itemDuration > totalDuration + FRAME
-              return <div className={`cc-track cc-audio-item-track ${item.track}`} key={item.id}>
-                <span className="cc-track-label">{item.track === 'music' ? 'Music' : 'Voice'}</span>
-                <div className={`cc-audio-item-clip ${item.track} ${item.muted ? 'muted' : ''} ${outside ? 'outside' : ''}`}
-                  style={{ left: item.start * pps, width: Math.max(28, itemDuration * pps) }}
-                  onMouseDown={(event) => startAudioItemDrag(item, event)} onClick={(event) => { event.stopPropagation(); seekGlobal(item.start) }}
-                  title={`${item.name} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1_short')}` : ''}`}>
-                  <span>{item.name}</span>
-                  <button onClick={(event) => { event.stopPropagation(); removeAudioItem(item.id) }} title={t('audio_item_remove_tip')}><X size={11} /></button>
-                </div>
-              </div>
-            })}
-            {overlays.length > 0 && (
-              <div className="cc-track ovl">
-                {overlays.map((o) => (
-                  <div key={o.id} className={`cc-oclip ${selOv === o.id ? 'sel' : ''}`}
-                    style={{ left: o.start * pps, width: Math.max((o.end - o.start) * pps, 18) }}
-                    onMouseDown={(e) => startOvMove(o, e)} onClick={(e) => e.stopPropagation()} title={o.text}>
-                    <div className="oh l" onMouseDown={(e) => startOvResize(o, 'l', e)} />
-                    <span>{o.type === 'emoji' ? o.text : o.text}</span>
-                    <div className="oh r" onMouseDown={(e) => startOvResize(o, 'r', e)} />
-                  </div>
-                ))}
-              </div>
-            )}
-            {dragInsert != null && <div className="cc-drop-ind" style={{ left: (dragInsert < layout.length ? layout[dragInsert].start : totalDuration) * pps }} />}
-            {hasClips && <div className="cc-playhead" style={{ left: current * pps }}><div className="head" onMouseDown={startScrub} /></div>}
-          </div>
-        </div>
-      </div>
-
-      {dragOver && <div className="cc-drop"><div>{t('drop_overlay')}</div></div>}
+      {dragOver && <div className="cc-drop" style={{ bottom: tlH }}><div>{t('drop_overlay')}</div></div>}
 
       <ToastStack toasts={toasts} onClose={closeToast} />
+      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxMenu.target.kind === 'tab' ? buildTabMenuItems(ctxMenu.target.id) : buildContextItems(ctxMenu.target)} onClose={() => setCtxMenu(null)} />}
 
       {showExport && (
         <ExportDialog
@@ -2464,7 +2966,7 @@ export default function App() {
           captionsCount={captions.length} burnCaptions={burnCaptions} setBurnCaptions={changeBurnCaptions}
           clipCount={clips.length} totalDuration={totalDuration}
           hasBurnStage={(burnCaptions && captions.length > 0) || overlays.length > 0}
-          hasAudioStage={!!(music || voice)}
+          hasAudioStage={audioItems.length > 0}
           exporting={exporting} progress={progress} stage={expStage} status={status}
           onStart={handleExport} onCancel={() => activeExportJobRef.current && window.taoclip.cancelExport?.(activeExportJobRef.current)}
           onClose={() => setShowExport(false)} />

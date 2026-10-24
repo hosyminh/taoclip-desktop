@@ -3,7 +3,9 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { normalizeProject } from './src/renderer/project-model.js'
+import { normalizeProject as normalizeProjectFull, activeTimeline } from './src/renderer/project-model.js'
+// Cac kiem tra cu doc noi dung o muc du an: tran noi dung timeline dang mo len de giu nguyen cach viet.
+const normalizeProject = (data, makeId) => { const full = normalizeProjectFull(data, makeId); return { ...full, ...activeTimeline(full) } }
 import { createAsyncResourceGuard } from './src/renderer/async-resource-guard.js'
 import { attachDocumentMouseDrag } from './src/renderer/drag-utils.js'
 import { aggregateBatchProgress } from './src/renderer/export-progress.js'
@@ -197,9 +199,9 @@ assert.deepEqual(mapTimelineRangeToSources(t02Plan, 2.4, 3.6).map(({ clipId, sta
 const legacy = normalizeProject({ version: 1, clips: [{ path: 'C:/media/a.mp4', in: 2, out: 6, speed: 2 }],
   bgAudio: { kind: 'tts', path: 'C:/voice.wav', name: 'voice' }, bgVolume: 0.7,
   captions: [{ start: 3, end: 4, text: 'hello' }] }, makeId)
-assert.equal(legacy.version, 5)
+assert.equal(legacy.version, 6)
 assert.equal(legacy.captionTimebase, 'source-legacy')
-assert.equal(legacy.voice, null, 'v5 no longer keeps a separate voice slot')
+assert.equal(legacy.voice, undefined, 'v5 no longer keeps a separate voice slot')
 assert.equal(legacy.audioItems[0].path, 'C:/voice.wav')
 assert.equal(legacy.audioItems[0].trackId, 'A2', 'migrated voice goes to the first free audio track after A1')
 assert.equal(legacy.clips[0].id, 'clip_1')

@@ -184,6 +184,9 @@ function ratioDims(ratio, short = 1080) {
   }
 }
 
+// "Tang cuong" mot clip: giam nhieu nhe + lam net + tang nhe tuong phan / bao hoa (loc cuc bo, khong phai AI phong to)
+const ENHANCE_FILTER = 'hqdn3d=1.5:1.5:6:6,unsharp=5:5:0.8:3:3:0.4,eq=contrast=1.05:saturation=1.1'
+
 function buildColorFilter(key, intensity = 100) {
   const preset = FILTER_PRESETS.find((item) => item.k === key)
   if (!preset) throw new Error(`Filter không được hỗ trợ: ${key}`)
@@ -441,6 +444,50 @@ function extractAudioWav(input, out) {
 }
 
 // ---------- Trich audio 1 clip (trim+toc do) hoac im lang -> WAV 16k mono ----------
+/** Khung hinh day du kich thuoc (PNG) tai thoi diem nguon t - dung cho freeze frame. */
+function extractFullFrame(input, t, output) {
+  return new Promise((resolve, reject) => {
+    const temp = `${output}.${crypto.randomUUID()}.tmp.png`
+    const ps = spawn(FFMPEG_PATH, ['-y', '-ss', String(Math.max(0, t)), '-i', path.resolve(input), '-frames:v', '1', '-c:v', 'png', temp])
+    let err = ''
+    ps.stderr.on('data', (d) => { if (err.length < 4000) err += d })
+    ps.on('error', reject)
+    ps.on('close', (code) => {
+      try {
+        if (code !== 0 || !fs.existsSync(temp) || fs.statSync(temp).size <= 0) throw new Error('freeze frame loi: ' + err.slice(-300))
+        fs.renameSync(temp, output)
+        resolve(output)
+      } catch (error) { try { fs.rmSync(temp, { force: true }) } catch {}; reject(error) }
+    })
+  })
+}
+
+/** Luu doan [start, end] (giay trong file nguon) cua video/audio thanh WAV / MP3 / M4A theo duoi file dich; speed ap dung bang atempo. */
+async function saveAudioRange({ input, start = 0, end, speed = 1, output }) {
+  const info = await probe(input)
+  if (!info.hasAudio) throw new Error('NO_AUDIO')
+  const from = Math.max(0, Number(start) || 0)
+  const to = Number.isFinite(Number(end)) ? Math.min(Number(end), info.duration || Infinity) : info.duration
+  if (!(to - from > 0)) throw new Error('Doan am thanh khong hop le.')
+  const ext = path.extname(output).toLowerCase()
+  const codec = ext === '.mp3' ? ['-c:a', 'libmp3lame', '-q:a', '2'] : ext === '.m4a' || ext === '.aac' ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'pcm_s16le']
+  const factor = Number(speed) > 0 ? Number(speed) : 1
+  const temp = path.join(path.dirname(output), `${path.basename(output, ext)}.${crypto.randomUUID()}.part${ext}`)
+  const args = ['-y', '-ss', String(from), '-t', String(to - from), '-i', path.resolve(input), '-vn',
+    ...(factor !== 1 ? ['-af', buildAtempoChain(factor).join(',')] : []), ...codec, temp]
+  try {
+    await new Promise((resolve, reject) => {
+      const ps = spawn(FFMPEG_PATH, args)
+      let err = ''
+      ps.stderr.on('data', (d) => { if (err.length < 4000) err += d })
+      ps.on('error', reject)
+      ps.on('close', (code) => (code === 0 ? resolve() : reject(new Error('luu am thanh loi: ' + err.slice(-300)))))
+    })
+    fs.renameSync(temp, output)
+    return output
+  } catch (error) { try { fs.rmSync(temp, { force: true }) } catch {}; throw error }
+}
+
 function clipAudioWav({ input, inPoint, outPoint, speed = 1, hasAudio, outDur, output }) {
   return new Promise((resolve, reject) => {
     const args = ['-y']
@@ -757,7 +804,10 @@ async function exportClips({ clips, output, ratio, colorFilter, transition, edit
   let dims = ratioDims(ratio, currentJob().shortSide)
   if (!dims) { const original = displayDims(infos[0]); dims = [original[0] || 1080, original[1] || 1920] }
   dims = [dims[0] - (dims[0] % 2), dims[1] - (dims[1] % 2)]
-  const anyAudio = infos.some((i) => i.hasAudio)
+  // Tieng goc cua clip da tach (audioDetached) hoac tat tieng (audioMuted) khong dua vao ban ghep: clip do duoc thay bang im lang
+  const clipHasAudio = (index) => infos[index].hasAudio && !clips[index].audioDetached && !clips[index].audioMuted
+  const anyAudio = infos.some((_info, index) => clipHasAudio(index))
+  const clipColorFilter = (clip) => [colorFilter, clip.enhance ? ENHANCE_FILTER : null].filter(Boolean).join(',') || null
   const durs = clips.map((c) => (c.out - c.in) / (c.speed || 1))
   const overlaps = clips.slice(1).map((clip, index) => {
     const planned = editPlan?.[index + 1]?.overlapIn
@@ -776,14 +826,14 @@ async function exportClips({ clips, output, ratio, colorFilter, transition, edit
       const onSeg = (sec) => onProgress && onProgress(Math.min(50, Math.round(((done + sec) / encodeTotal) * 50)))
       if (c.kind === 'image') {
         await encodeImageTS({
-          input: c.input, dur: (c.out - c.in) || 3, dims, cropMode: c.cropMode || 'fit', cropX: c.cropX, cropY: c.cropY, colorFilter, kenBurns: c.kenBurns !== false,
+          input: c.input, dur: (c.out - c.in) || 3, dims, cropMode: c.cropMode || 'fit', cropX: c.cropX, cropY: c.cropY, colorFilter: clipColorFilter(c), kenBurns: c.kenBurns !== false,
           animated: c.animated === true || c.formatName === 'gif', anyAudio,
           fadeIn: fade && i > 0, fadeOut: fade && i < clips.length - 1, fadeDur, output: out, onProgress: onSeg
         })
       } else {
         await encodeClipTS({
-          input: c.input, inPoint: c.in, outPoint: c.out, speed: c.speed || 1, dims, cropMode: c.cropMode || 'fit', cropX: c.cropX, cropY: c.cropY, colorFilter,
-          hasAudio: infos[i].hasAudio, anyAudio, output: out,
+          input: c.input, inPoint: c.in, outPoint: c.out, speed: c.speed || 1, dims, cropMode: c.cropMode || 'fit', cropX: c.cropX, cropY: c.cropY, colorFilter: clipColorFilter(c),
+          hasAudio: clipHasAudio(i), anyAudio, output: out,
           fadeIn: fade && i > 0, fadeOut: fade && i < clips.length - 1, fadeDur, onProgress: onSeg
         })
       }
@@ -889,11 +939,12 @@ async function mixAudioTracks({ video, tracks = [], output, videoVol = 1, hasOri
     const info = await probe(tk.path)
     const sourceIn = Math.max(0, Number(tk.in ?? 0))
     const sourceOut = Math.min(info.duration || Infinity, Number(tk.out ?? info.duration))
-    const sourceDuration = sourceOut - sourceIn
+    const speed = Math.min(16, Math.max(0.05, Number(tk.speed) || 1))
+    const sourceDuration = (sourceOut - sourceIn) / speed // do dai tren timeline (da tinh toc do audio)
     const start = Math.max(0, Number(tk.start ?? ((tk.delay || 0) / 1000)))
     const remaining = Math.max(0, duration - start)
     if (!info.hasAudio || !Number.isFinite(sourceDuration) || sourceDuration <= 0 || remaining <= 0) continue
-    usable.push({ ...tk, sourceIn, sourceOut, sourceDuration, start, remaining,
+    usable.push({ ...tk, sourceIn, sourceOut, sourceDuration, speed, start, remaining,
       segmentDuration: tk.loop ? remaining : Math.min(sourceDuration, remaining),
       volume: Math.max(0, Math.min(4, Number(tk.volume ?? tk.gain ?? 1))),
       fadeIn: Math.max(0, Number(tk.fadeIn || 0)), fadeOut: Math.max(0, Number(tk.fadeOut || 0)) })
@@ -905,6 +956,7 @@ async function mixAudioTracks({ video, tracks = [], output, videoVol = 1, hasOri
   const fc = [], trackLabels = [], roleIndices = { music: [], voice: [] }
   usable.forEach((tk, i) => {
     const filters = [`atrim=start=${tk.sourceIn.toFixed(6)}:end=${tk.sourceOut.toFixed(6)}`, 'asetpts=PTS-STARTPTS', norm]
+    if (tk.speed !== 1) filters.push(...buildAtempoChain(tk.speed))
     if (tk.loop) filters.push(`aloop=loop=-1:size=${Math.max(1, Math.round(tk.sourceDuration * 44100))}`, `atrim=duration=${tk.remaining.toFixed(6)}`)
     else filters.push(`atrim=duration=${tk.segmentDuration.toFixed(6)}`)
     if (tk.fadeIn > 0) filters.push(`afade=t=in:st=0:d=${Math.min(tk.fadeIn, tk.segmentDuration).toFixed(6)}`)
@@ -1174,6 +1226,7 @@ async function exportVideo(opts) {
 
 module.exports = {
   configure, probe, inspectMedia, decodeOutput, getKeyframes, buildAtempoChain, exportVideo, vencArgs, buildColorFilter, renderFilterPreview, writeAiEditMetadata, prioritizeCache,
+  extractFullFrame, saveAudioRange, ENHANCE_FILTER,
   generateThumbnails, generateWaveform, detectSilence, computeKeep, ratioDims,
   extractAudioWav, burnSubtitles, mixAudio, mixAudioTracks, exportClips, compositeVideoOverlays, encodeImageTS, crossfadeChain,
   setEncoder, setOutputProfile, getEncoder, detectBestEncoder, createPreviewProxy, previewProxyFingerprint, buildTimelineAudioWav, buildVoiceSourceWav, concatAudioFiles, buildRedubTrack,

@@ -15,6 +15,10 @@ export default function ShortcutsModal({ onClose }) {
           <kbd>Home / End</kbd><span>{t('sc_home')}</span>
           <kbd>I / O</kbd><span>{t('sc_io')}</span>
           <kbd>S</kbd><span>{t('sc_split')}</span>
+          <kbd>Ctrl+B</kbd><span>{t('sc_split_at')}</span>
+          <kbd>Ctrl+C / V / D</kbd><span>{t('sc_copy')}</span>
+          <kbd>F</kbd><span>{t('sc_freeze')}</span>
+          <kbd>M</kbd><span>{t('sc_mute_item')}</span>
           <kbd>Del</kbd><span>{t('sc_del')}</span>
           <kbd>+ / −</kbd><span>{t('sc_zoom')}</span>
           <kbd>Ctrl+Z / Y</kbd><span>{t('sc_undo')}</span>

@@ -4,11 +4,15 @@ const crypto = require('crypto')
 
 const MAX_PROJECT_BYTES = 25 * 1024 * 1024
 
+// Moi timeline (v6) co clip/overlay/audio rieng; thu vien assets dung chung o muc du an.
+// Van doc duoc dang phang (v5 tro xuong) vi du lieu cu co the dua thang vao day.
 function forEachAsset(project, visit) {
-  for (const clip of project.clips || []) visit(clip)
+  for (const scope of [project, ...(Array.isArray(project.timelines) ? project.timelines : [])]) {
+    for (const clip of scope.clips || []) visit(clip)
+    for (const item of scope.videoOverlays || []) if (!item?.sticker) visit(item)
+    for (const item of scope.audioItems || []) visit(item)
+  }
   for (const asset of project.assets || []) visit(asset)
-  for (const item of project.videoOverlays || []) if (!item?.sticker) visit(item)
-  for (const item of project.audioItems || []) visit(item)
   if (project.music?.path) visit(project.music)
   if (project.voice?.path) visit(project.voice)
 }

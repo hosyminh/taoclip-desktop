@@ -9,7 +9,8 @@
 ## Chức năng
 
 - Nhập video, ảnh, GIF và audio; sắp xếp, trim, split, crop và thay đổi tốc độ clip.
-- Dựng timeline nhiều lớp, thêm chữ, sticker, phụ đề, nhạc nền và chuyển cảnh.
+- Dựng timeline nhiều track (hình ở trên, tiếng ở dưới): kéo thả file vào đúng track và thời điểm, tách âm thanh khỏi video, menu chuột phải (sao chép, nhân bản, tách, khung hình dừng, tăng cường…), thêm chữ, sticker, phụ đề, nhạc nền và chuyển cảnh.
+- Nhiều timeline trong một project (tab Timeline 1, Timeline 2…) để làm nhiều tập hoặc nhiều clip; thư viện media dùng chung, mỗi tab có lịch sử hoàn tác riêng.
 - Phân tích khoảng lặng, tạo phụ đề, đọc văn bản và xử lý nền bằng các model AI tải riêng.
 - Lưu/mở project, relink media, thu thập media để chuyển project, undo/redo và khôi phục phiên.
 - Xuất MP4 bằng CPU hoặc encoder GPU khả dụng, chọn chất lượng (Cao/Chuẩn/Nhỏ gọn), độ phân giải cạnh ngắn (720/1080/1440) và xuất nhiều tỉ lệ. Tốc độ khung hình xuất cố định 30 fps; tỉ lệ Gốc giữ kích thước của clip đầu tiên.

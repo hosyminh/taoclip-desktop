@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('taoclip', {
     return () => ipcRenderer.removeListener('redub:progress', handler)
   },
   showInFolder: (p) => ipcRenderer.invoke('shell:showInFolder', p),
+  freezeFrame: (filePath, time) => ipcRenderer.invoke('video:freezeFrame', filePath, time),
+  saveAudioAs: (request) => ipcRenderer.invoke('audio:saveAs', request),
   saveVideo: (defaultName) => ipcRenderer.invoke('dialog:saveVideo', defaultName),
   exportVideo: (opts) => ipcRenderer.invoke('video:export', opts),
   cancelExport: (jobId) => ipcRenderer.invoke('export:cancel', jobId),

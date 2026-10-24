@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, protocol, net }
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { pathToFileURL } = require('url')
+const { Readable } = require('stream')
 
 // Media/thumbnail cuc bo duoc phuc vu qua taoclip-media:// thay vi file://.
 // Khi chay dev, trang la http://localhost:5173 nen Chromium chan nap file:// ("Media load rejected by URL safety check");
@@ -11,13 +11,34 @@ const MEDIA_SCHEME = 'taoclip-media'
 const MEDIA_EXT = /\.(mp4|mov|mkv|avi|webm|m4v|ts|mp3|wav|m4a|aac|ogg|flac|wma|jpe?g|png|webp|bmp|gif)$/i
 protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
+const MEDIA_MIME = {
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.ts': 'video/mp2t',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.wma': 'audio/x-ms-wma',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.bmp': 'image/bmp', '.gif': 'image/gif'
+}
+
+// Phuc vu file cuc bo co ho tro HTTP Range (206 + Content-Range) de the <video>/<audio> tua duoc tren file lon
 function registerMediaProtocol() {
   protocol.handle(MEDIA_SCHEME, async (request) => {
     try {
       const filePath = decodeURIComponent(new URL(request.url).pathname.slice(1))
       if (!path.isAbsolute(filePath) || !MEDIA_EXT.test(filePath)) return new Response('Forbidden', { status: 403 })
-      // Chuyen tiep header (Range) de tua video/audio hoat dong
-      return await net.fetch(pathToFileURL(filePath).toString(), { headers: request.headers })
+      const stat = await fs.promises.stat(filePath)
+      if (!stat.isFile()) return new Response('Not found', { status: 404 })
+      const size = stat.size
+      const headers = { 'Content-Type': MEDIA_MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'Accept-Ranges': 'bytes' }
+      if (size === 0) return new Response(null, { status: 200, headers: { ...headers, 'Content-Length': '0' } })
+      const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('range') || '')
+      let start = 0, end = size - 1, status = 200
+      if (match && (match[1] || match[2])) {
+        if (match[1] === '') start = Math.max(0, size - Number(match[2])) // "bytes=-N": N byte cuoi
+        else { start = Number(match[1]); if (match[2]) end = Math.min(size - 1, Number(match[2])) }
+        if (start > end || start >= size) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+        status = 206
+      }
+      headers['Content-Length'] = String(end - start + 1)
+      if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${size}`
+      return new Response(Readable.toWeb(fs.createReadStream(filePath, { start, end })), { status, headers })
     } catch {
       return new Response('Not found', { status: 404 })
     }
@@ -66,8 +87,8 @@ function createWindow() {
     backgroundColor: '#0f1115',
     title: 'TaoClip',
     // Windows: bo thanh tieu de trang mac dinh, header toi cua app tu lam thanh tieu de; nut thu/phong/dong la overlay
-    // (height phai khop .cc-top = 48px trong styles.css)
-    ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#16161a', symbolColor: '#f2f3f5', height: 48 } } : {}),
+    // Overlay bat dau tu dong 1 cua so (do do sat tren) nen cao 46 thay vi 48 de khong che duong vien duoi header (.cc-top 48px, border-bottom 1px)
+    ...(process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#16161a', symbolColor: '#f2f3f5', height: 46 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -222,6 +243,43 @@ ipcMain.handle('captions:generate', async (event, filePath, opts) => {
     event.sender.send('captions:progress', { phase: 'done' })
     return segs
   } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch {} }
+})
+
+// Freeze frame: khung hinh day du kich thuoc tai thoi diem nguon -> PNG trong userData (cache theo file + thoi diem)
+ipcMain.handle('video:freezeFrame', async (_event, filePath, time) => {
+  const input = String(filePath || '')
+  const t = Number(time)
+  if (!input || !fs.existsSync(input) || !Number.isFinite(t) || t < 0) throw new Error('Tham so freeze frame khong hop le.')
+  const dir = path.join(app.getPath('userData'), 'generated', 'freeze')
+  fs.mkdirSync(dir, { recursive: true })
+  const stat = fs.statSync(input)
+  const key = crypto.createHash('sha256').update(`${path.resolve(input)}|${stat.size}|${stat.mtimeMs}|${t.toFixed(3)}`).digest('hex').slice(0, 24)
+  const output = path.join(dir, `${key}.png`)
+  if (!fs.existsSync(output) || fs.statSync(output).size <= 0) await ops.extractFullFrame(input, t, output)
+  return output
+})
+
+// Luu am thanh cua mot doan (clip / item) thanh WAV / MP3 / M4A
+ipcMain.handle('audio:saveAs', async (_event, request) => {
+  const input = String(request?.input || '')
+  if (!input || !fs.existsSync(input)) throw new Error('Khong tim thay file nguon.')
+  const start = Number(request?.start) || 0
+  const end = request?.end == null ? null : Number(request.end)
+  const speed = Number(request?.speed) > 0 ? Number(request.speed) : 1
+  const stub = e2eDialog('saveAudio')
+  let target
+  if (stub) target = stub.value
+  else {
+    const res = await dialog.showSaveDialog({
+      title: 'Lưu âm thanh', defaultPath: String(request?.defaultName || 'audio.wav'),
+      filters: [{ name: 'WAV', extensions: ['wav'] }, { name: 'MP3', extensions: ['mp3'] }, { name: 'M4A (AAC)', extensions: ['m4a'] }]
+    })
+    target = res.canceled ? null : res.filePath
+  }
+  if (!target) return null
+  if (path.resolve(target).toLowerCase() === path.resolve(input).toLowerCase()) throw new Error('Không thể ghi đè file nguồn.')
+  await ops.saveAudioRange({ input, start, end, speed, output: target })
+  return target
 })
 
 // Chon noi luu file xuat
@@ -577,7 +635,8 @@ ipcMain.handle('dialog:openFaceImage', async () => {
 
 // Luu du an (.taoclip = JSON)
 ipcMain.handle('project:save', async (_e, data, currentPath) => {
-  const res = await dialog.showSaveDialog({
+  const stub = e2eDialog('saveProject')
+  const res = stub ? { canceled: !stub.value, filePath: stub.value } : await dialog.showSaveDialog({
     title: 'Luu du an', defaultPath: typeof currentPath === 'string' && currentPath ? currentPath : 'taoclip-project.taoclip',
     filters: [{ name: 'TaoClip Project', extensions: ['taoclip'] }]
   })
@@ -593,7 +652,8 @@ ipcMain.handle('project:write', (_e, filePath, data) => {
 
 // Mo du an
 ipcMain.handle('project:open', async () => {
-  const res = await dialog.showOpenDialog({
+  const stub = e2eDialog('openProject')
+  const res = stub ? { canceled: !stub.value, filePaths: stub.value ? [stub.value] : [] } : await dialog.showOpenDialog({
     title: 'Mo du an', properties: ['openFile'],
     filters: [{ name: 'TaoClip Project', extensions: ['taoclip'] }]
   })
@@ -666,7 +726,7 @@ ipcMain.handle('dialog:relinkMedia', async (_e, kind) => {
 // nhieu clip HOAC co anh (slideshow) -> exportClips (ghep tung doan)
 async function coreExport(opts, output, onProgress) {
   const colorFilter = ops.buildColorFilter(opts.filterKey || 'none', opts.filterIntensity ?? 100)
-  const useClips = opts.clips && (opts.clips.length > 1 || opts.clips.some((c) => c.kind === 'image'))
+  const useClips = opts.clips && (opts.clips.length > 1 || opts.clips.some((c) => c.kind === 'image' || c.audioDetached || c.audioMuted || c.enhance))
   if (useClips) return ops.exportClips({ clips: opts.clips, output, ratio: opts.ratio, colorFilter, transition: opts.transition, editPlan: opts.editPlan, onProgress })
   const c = opts.clips && opts.clips[0]
   return ops.exportVideo({
@@ -748,7 +808,7 @@ async function runExport(event, opts) {
   const audioTracks = Array.isArray(opts.audioItems) && opts.audioItems.length
     ? opts.audioItems.filter((item) => item && !item.muted).map((item) => ({
       path: item.path, role: item.track, volume: item.gain ?? 1, loop: !!item.loop,
-      start: item.start ?? 0, in: item.in ?? 0, out: item.out, fadeIn: item.fadeIn ?? 0, fadeOut: item.fadeOut ?? 0
+      start: item.start ?? 0, in: item.in ?? 0, out: item.out, speed: item.speed ?? 1, fadeIn: item.fadeIn ?? 0, fadeOut: item.fadeOut ?? 0
     }))
     : [
       ...(opts.music ? [{ path: opts.music.path, volume: opts.music.volume ?? 1, loop: opts.music.loop !== false, role: 'music' }] : []),

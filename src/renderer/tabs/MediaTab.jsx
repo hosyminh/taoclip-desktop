@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Link, FolderOpen, X } from 'lucide-react'
+import { ASSET_DRAG_TYPE } from '../timeline/geometry.js'
 import { useI18n } from '../i18n.jsx'
 import { fmt, fileUrl, clipOut } from '../utils.js'
 
@@ -95,7 +96,11 @@ export default function MediaTab({ clips, selId, setSelId, layout, seekGlobal, o
           const preview = missing ? null : asset.kind === 'image' ? asset.path : assetPreviews[key]?.source
           const previewError = assetPreviews[key]?.state === 'error'
           const uses = assetUsage(asset)
-          return <div key={asset.id} className={`cc-card ${appearances.some((clip) => clip.id === selId) ? 'on' : ''}`} onClick={() => {
+          return <div key={asset.id} className={`cc-card ${appearances.some((clip) => clip.id === selId) ? 'on' : ''}`}
+            draggable={!missing} onDragStart={(event) => {
+              event.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify({ path: asset.path, kind: asset.kind, name: asset.name }))
+              event.dataTransfer.effectAllowed = 'copy'
+            }} onClick={() => {
             if (selected) { setSelId(selected.id); seekGlobal((layout.find((segment) => segment.id === selected.id) || {}).start || 0) }
           }}>
             <div className="thumb" style={preview ? { backgroundImage: `url(${fileUrl(preview)})` } : undefined}>{!preview && (missing ? '⚠️' : audio ? '🎵' : image ? '🖼️' : assetPreviews[key]?.state === 'loading' ? '…' : '🎬')}{(image || audio) && <em className="badge">{image ? 'IMG' : 'AUDIO'}</em>}<span>{fmt(image ? (selected ? clipOut(selected) : asset.metadata?.duration || 0) : asset.metadata?.duration || selected?.src.duration || 0)}</span></div>

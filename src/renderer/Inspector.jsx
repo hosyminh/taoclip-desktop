@@ -3,6 +3,9 @@ import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 import { useI18n } from './i18n.jsx'
 import { fmt, isImg, clipOut, SPEEDS, SLIDE_DURS } from './utils.js'
 
+// Vi tri nhanh cua hinh trong khung kieu Fill: [cropX, cropY, mui ten chi phan hinh dang hien]
+const CROP_ANCHORS = [[0, 0, '↖'], [0.5, 0, '↑'], [1, 0, '↗'], [0, 0.5, '←'], [0.5, 0.5, '•'], [1, 0.5, '→'], [0, 1, '↙'], [0.5, 1, '↓'], [1, 1, '↘']]
+
 // Bang thuoc tinh ben phai: ti le khung, clip dang chon, che do xuat,
 // chuyen canh, GPU, auto-cut, xuat them ti le
 export default function Inspector({
@@ -64,10 +67,21 @@ export default function Inspector({
           <label style={{ marginTop: 10 }}>{t('crop_mode_title')}</label>
           <div className="seg"><button className={(selectedClip.cropMode || 'fit') === 'fit' ? 'on' : ''} disabled={(selectedClip.cropMode || 'fit') === 'fit'} onClick={() => { pushHistory(); updateClip(selectedClip.id, { cropMode: 'fit' }) }}>{t('crop_fit')}</button>
             <button className={selectedClip.cropMode === 'fill' ? 'on' : ''} disabled={selectedClip.cropMode === 'fill'} onClick={() => { pushHistory(); updateClip(selectedClip.id, { cropMode: 'fill' }) }}>{t('crop_fill')}</button></div>
-          {selectedClip.cropMode === 'fill' && <>
-            <label className="num-field"><span>{t('crop_cx')}</span><input type="range" min="0" max="1" step="0.01" value={selectedClip.cropX ?? 0.5} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => updateClip(selectedClip.id, { cropX: Number(e.target.value) })} /></label>
-            <label className="num-field"><span>{t('crop_cy')}</span><input type="range" min="0" max="1" step="0.01" value={selectedClip.cropY ?? 0.5} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => updateClip(selectedClip.id, { cropY: Number(e.target.value) })} /></label>
-          </>}
+          {selectedClip.cropMode === 'fill' ? <>
+            <label style={{ marginTop: 10 }}>{t('crop_anchor')}</label>
+            <div className="crop-anchors">
+              {CROP_ANCHORS.map(([ax, ay, arrow]) => {
+                const cx = selectedClip.cropX ?? 0.5, cy = selectedClip.cropY ?? 0.5
+                const on = Math.abs(cx - ax) < 0.005 && Math.abs(cy - ay) < 0.005
+                return <button key={`${ax}-${ay}`} className={on ? 'on' : ''} title={t('crop_anchor')} aria-pressed={on}
+                  onClick={() => { pushHistory(); updateClip(selectedClip.id, { cropX: ax, cropY: ay }) }}>{arrow}</button>
+              })}
+            </div>
+            <label style={{ marginTop: 10 }}>{t('crop_cx')} <b>{Math.round((selectedClip.cropX ?? 0.5) * 100)}%</b></label>
+            <input type="range" min="0" max="1" step="0.01" value={selectedClip.cropX ?? 0.5} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => updateClip(selectedClip.id, { cropX: Number(e.target.value) })} />
+            <label style={{ marginTop: 6 }}>{t('crop_cy')} <b>{Math.round((selectedClip.cropY ?? 0.5) * 100)}%</b></label>
+            <input type="range" min="0" max="1" step="0.01" value={selectedClip.cropY ?? 0.5} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => updateClip(selectedClip.id, { cropY: Number(e.target.value) })} />
+          </> : <small className="cap-hint">{t('crop_pos_fit_hint')}</small>}
         </div>
       )}
 

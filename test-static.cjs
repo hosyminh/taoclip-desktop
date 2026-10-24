@@ -53,6 +53,25 @@ for (const [file, ast] of asts) {
 }
 check('renderer khong dung const/let truoc khi khai bao luc render (TDZ)', tdz.length === 0, tdz)
 
+// 1a) Khong dung bien chua khai bao (vd sot lai ten sau khi xoa state): chi cho phep cac global cua trinh duyet / ES
+const KNOWN_GLOBALS = new Set(['window', 'document', 'localStorage', 'sessionStorage', 'navigator', 'performance', 'requestAnimationFrame', 'cancelAnimationFrame',
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'ResizeObserver', 'Audio', 'Image', 'console', 'Math', 'JSON', 'Number', 'String', 'Array',
+  'Object', 'Set', 'Map', 'WeakMap', 'Promise', 'Date', 'Error', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'Infinity', 'NaN', 'undefined', 'Boolean',
+  'globalThis', 'Intl', 'URL', 'Event', 'KeyboardEvent', 'MouseEvent', 'DataTransfer', 'File', 'FileReader', 'Blob', 'encodeURI', 'decodeURI',
+  'encodeURIComponent', 'decodeURIComponent', 'Symbol', 'RegExp', 'Function', 'crypto', 'fetch', 'AbortController', 'structuredClone', 'queueMicrotask', 'CSS', 'getComputedStyle',
+  'WeakSet', 'Uint8Array', 'Float32Array', 'ArrayBuffer', 'TextEncoder', 'TextDecoder', 'Reflect', 'Proxy', 'BigInt'])
+const undeclared = []
+for (const [file, ast] of asts) {
+  babel.traverse(ast, {
+    Program(programPath) {
+      for (const name of Object.keys(programPath.scope.globals)) {
+        if (!KNOWN_GLOBALS.has(name)) undeclared.push(`${path.relative(__dirname, file)}: '${name}' chua duoc khai bao`)
+      }
+    }
+  })
+}
+check('renderer khong dung bien chua khai bao', undeclared.length === 0, undeclared)
+
 // 1b) Media cuc bo phai di qua fileUrl() (taoclip-media://); file:// bi chan khi chay dev (http://localhost)
 const rawFileUrls = []
 for (const file of sources) {

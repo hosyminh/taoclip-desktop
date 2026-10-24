@@ -259,6 +259,44 @@ async function run() {
     output: p('mix-v10-voice-offset.mp4'), hasOrigAudio: false, ducking: false, totalDuration: 10 })
   check('voice starts after its 2s timeline offset', rmsAt('mix-v10-voice-offset.mp4', 0.5) < 0.0001 && rmsAt('mix-v10-voice-offset.mp4', 2.4) > 0.01)
 
+  // Audio item co toc do: nguon 3s tang 2x -> chi chiem 1.5s tren timeline
+  await ops.mixAudioTracks({ video: NA, output: p('audio-speed.mp4'), hasOrigAudio: false, totalDuration: 6, ducking: false,
+    tracks: [{ path: p('music.mp3'), role: 'music', start: 1, in: 0, out: 3, speed: 2, volume: 1 }] })
+  const speedLoud = rmsAt('audio-speed.mp4', 2.0), speedAfter = rmsAt('audio-speed.mp4', 3.0)
+  check('audio item speed 2x plays its 3s source in 1.5s on the timeline', speedLoud > 0.05 && speedAfter < 0.001, `(at 2.0s=${speedLoud.toFixed(4)}, at 3.0s=${speedAfter.toFixed(4)})`)
+
+  // Tieng goc cua clip da tach / tat tieng: clip do im lang, clip con lai van co tieng
+  const detachedOut = p('clips-detached.mp4')
+  await ops.exportClips({ clips: [
+    { input: SRC, kind: 'video', in: 0, out: 2, speed: 1, audioDetached: true },
+    { input: SRC, kind: 'video', in: 0, out: 2, speed: 1 }
+  ], output: detachedOut, ratio: '16:9' })
+  const detachedFirst = rmsAt('clips-detached.mp4', 1.0), detachedSecond = rmsAt('clips-detached.mp4', 3.0)
+  check('detached clip is silent while the next clip keeps its audio', detachedFirst < 0.001 && detachedSecond > 0.01, `(clip1=${detachedFirst.toFixed(4)}, clip2=${detachedSecond.toFixed(4)})`)
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, audioMuted: true }], output: p('clip-muted.mp4'), ratio: '16:9' })
+  check('muted-only export has no audio stream', !(await ops.probe(p('clip-muted.mp4'))).hasAudio)
+
+  // Tang cuong (enhance): bo loc hop le, xuat duoc, khac ban goc
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1 }], output: p('clip-plain.mp4'), ratio: '16:9' })
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, enhance: true }], output: p('clip-enhanced.mp4'), ratio: '16:9' })
+  const plainInfo = await ops.probe(p('clip-plain.mp4')), enhancedInfo = await ops.probe(p('clip-enhanced.mp4'))
+  check('enhance export keeps size and duration but changes the picture data', enhancedInfo.width === plainInfo.width && near(enhancedInfo.duration, plainInfo.duration, 0.2) &&
+    fs.statSync(p('clip-enhanced.mp4')).size !== fs.statSync(p('clip-plain.mp4')).size)
+
+  // Freeze frame: PNG day du kich thuoc nguon
+  await ops.extractFullFrame(SRC, 1.5, p('freeze.png'))
+  const freezeInfo = await ops.probe(p('freeze.png'))
+  check('freeze frame is a full-size PNG of the source', freezeInfo.width === 640 && freezeInfo.height === 480, `(${freezeInfo.width}x${freezeInfo.height})`)
+
+  // Luu am thanh thanh WAV/MP3 (co toc do), file khong tieng bi tu choi
+  await ops.saveAudioRange({ input: SRC, start: 1, end: 5, speed: 2, output: p('saved-audio.wav') })
+  await ops.saveAudioRange({ input: SRC, start: 0, end: 3, output: p('saved-audio.mp3') })
+  check('saved audio range keeps duration / speed (4s at 2x = 2s)', near((await ops.probe(p('saved-audio.wav'))).duration, 2, 0.15) && near((await ops.probe(p('saved-audio.mp3'))).duration, 3, 0.3),
+    `(wav=${(await ops.probe(p('saved-audio.wav'))).duration.toFixed(2)}s, mp3=${(await ops.probe(p('saved-audio.mp3'))).duration.toFixed(2)}s)`)
+  let savedNoAudioRejected = false
+  try { await ops.saveAudioRange({ input: NA, start: 0, end: 2, output: p('saved-none.wav') }) } catch (error) { savedNoAudioRejected = /NO_AUDIO/.test(error.message) }
+  check('saving audio from a file without audio is rejected', savedNoAudioRejected && !fs.existsSync(p('saved-none.wav')))
+
   console.log('\n9c) Doi giong (re-dub): ghep TTS theo timeline')
   // cau 1: 1.5s vao slot 3s (giu nguyen); cau 2: 3s vao slot 2s (phai atempo 1.5x -> ~2s)
   gen('seg0.wav', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1.5', '-c:a', 'pcm_s16le'])

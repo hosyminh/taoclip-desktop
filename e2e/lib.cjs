@@ -18,6 +18,23 @@ function ffmpeg(args) {
   const r = spawnSync(ffmpegPath, ['-y', '-v', 'error', ...args], { encoding: 'utf8' })
   if (r.status !== 0) throw new Error('ffmpeg: ' + r.stderr)
 }
+function probeStreams(file) {
+  const r = spawnSync(ffprobePath, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8' })
+  return String(r.stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+}
+/** Muc am luong RMS (0..1) cua doan [start, start+0.2s] trong file audio/video. */
+function rmsAt(file, start, duration = 0.2) {
+  const r = spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(start), '-t', String(duration), '-i', file, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', 'pipe:1'])
+  if (r.status !== 0 || !r.stdout?.length) return 0
+  let sum = 0, count = 0
+  for (let i = 0; i + 1 < r.stdout.length; i += 2) { const n = r.stdout.readInt16LE(i) / 32768; sum += n * n; count++ }
+  return count ? Math.sqrt(sum / count) : 0
+}
+/** Mau [r,g,b] cua mot diem anh tai thoi diem t (giay) cua file video. */
+function pixelAt(file, x, y, t = 1) {
+  const r = spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=1:1:${x}:${y},format=rgb24`, '-f', 'rawvideo', 'pipe:1'])
+  return r.status === 0 && r.stdout?.length >= 3 ? [...r.stdout.subarray(0, 3)] : []
+}
 function probeDuration(file) {
   const r = spawnSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { encoding: 'utf8' })
   return Number(String(r.stdout).trim())
@@ -73,7 +90,7 @@ async function launchApp({ project = null, dialogs = {} } = {}) {
 class App {
   constructor(child, userData, port) {
     this.child = child; this.userData = userData; this.port = port
-    this.errors = []; this.seq = 0; this.pending = new Map()
+    this.errors = []; this.mediaResponses = []; this.seq = 0; this.pending = new Map()
   }
 
   async connect() {
@@ -90,6 +107,9 @@ class App {
       if (data.id && this.pending.has(data.id)) {
         const { resolve, reject } = this.pending.get(data.id); this.pending.delete(data.id)
         if (data.error) reject(new Error(data.error.message)); else resolve(data.result)
+      } else if (data.method === 'Network.responseReceived' && String(data.params.response.url).startsWith('taoclip-media://')) {
+        const h = Object.fromEntries(Object.entries(data.params.response.headers).map(([k, v]) => [k.toLowerCase(), v]))
+        this.mediaResponses.push({ url: data.params.response.url, status: data.params.response.status, contentRange: h['content-range'], acceptRanges: h['accept-ranges'], type: data.params.response.mimeType })
       } else if (data.method === 'Runtime.exceptionThrown') {
         const detail = data.params.exceptionDetails
         this.errors.push(detail.exception?.description || detail.text)
@@ -99,6 +119,7 @@ class App {
     }
     await this.send('Runtime.enable')
     await this.send('Page.enable')
+    await this.send('Network.enable')
   }
 
   send(method, params = {}) {
@@ -127,7 +148,7 @@ class App {
   }
 
   rect(selector, index = 0) {
-    return this.eval(`(() => { const el = document.querySelectorAll(${JSON.stringify(selector)})[${index}]; if (!el) return null; el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()`)
+    return this.eval(`(() => { const el = document.querySelectorAll(${JSON.stringify(selector)})[${index}]; if (!el) return null; el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); const box = el.closest('.cc-tlscroll'); if (box) { const limit = box.getBoundingClientRect().top + 70; const now = el.getBoundingClientRect(); if (now.top < limit) box.scrollTop -= limit - now.top } const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()`)
   }
   async center(selector, index = 0) {
     const r = await this.rect(selector, index)
@@ -140,6 +161,33 @@ class App {
   async click(selector, index = 0) {
     const { x, y } = await this.center(selector, index)
     await this.mouse('mouseMoved', x, y); await this.mouse('mousePressed', x, y); await this.mouse('mouseReleased', x, y)
+  }
+  async rightClick(selector, index = 0) {
+    const { x, y } = await this.center(selector, index)
+    await this.mouse('mouseMoved', x, y)
+    await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'right', buttons: 2, clickCount: 1 })
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'right', buttons: 0, clickCount: 1 })
+  }
+  /** Mo menu chuot phai tren phan tu va bam muc co `data-ctx` = id (menu dong lai sau khi chon). */
+  async menu(selector, index, ctxId) {
+    await this.rightClick(selector, index)
+    await this.waitFor(`!!document.querySelector('.cc-ctxmenu')`, { label: 'menu chuot phai' })
+    await this.click(`.cc-ctxmenu [data-ctx="${ctxId}"]`)
+    await this.waitFor(`!document.querySelector('.cc-ctxmenu')`, { label: 'menu dong' })
+  }
+  /** Bam vao thuoc thoi gian tai thoi diem t (giay): dat dau phat. */
+  async seekTo(t, pps = 80) {
+    // Khong dung rect() (no cuon timeline): tinh x tu vi tri cuon hien tai, tru cot tieu de dinh o ben trai
+    const point = await this.eval(`(() => { const scroller = document.querySelector('.cc-tlscroll'); scroller.scrollLeft = 0; const box = scroller.getBoundingClientRect(); const ruler = document.querySelector('.cc-ruler').getBoundingClientRect(); return { x: Math.round(box.left + 96 + ${t} * ${pps} - scroller.scrollLeft), y: Math.round(ruler.top + ruler.height / 2) } })()`)
+    await this.mouse('mouseMoved', point.x, point.y); await this.mouse('mousePressed', point.x, point.y); await this.mouse('mouseReleased', point.x, point.y)
+    const shown = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`
+    await this.waitFor(`(document.querySelector('.cc-tlbar .cur')?.innerText || '').startsWith(${JSON.stringify(shown)})`, { label: `dau phat ${shown}`, timeout: 6000 })
+  }
+  /** Bam phan tu dau tien khop selector va co chua `text` (chuot that). */
+  async clickText(selector, text) {
+    const index = await this.eval(`[...document.querySelectorAll(${JSON.stringify(selector)})].findIndex((el) => el.textContent.includes(${JSON.stringify(text)}))`)
+    if (index < 0) throw new Error(`Khong thay '${text}' trong ${selector}`)
+    await this.click(selector, index)
   }
   async dragBy(from, to, steps = 8) {
     await this.mouse('mouseMoved', from.x, from.y); await this.mouse('mousePressed', from.x, from.y)
@@ -160,6 +208,24 @@ class App {
     await this.send('Input.dispatchDragEvent', { type: 'drop', x, y, data })
   }
 
+  /**
+   * Tha file (duong dan that) hoac asset thu vien vao mot lane: ban dragEnter/dragOver o giua cua so de cac vung "tao track moi" hien ra,
+   * roi tha tai thoi diem `time` (giay) cua lane `rowSelector` (hoac tai tam phan tu neu rowSelector la vung tao track).
+   */
+  async dropOnLane({ files = [], assets = [], row, time = 0, pps = 80 }) {
+    const items = assets.map((asset) => ({ mimeType: 'application/x-taoclip-asset', data: JSON.stringify(asset) }))
+    const data = { items, files, dragOperationsMask: 1 }
+    await this.send('Input.dispatchDragEvent', { type: 'dragEnter', x: 640, y: 300, data })
+    await this.send('Input.dispatchDragEvent', { type: 'dragOver', x: 640, y: 300, data })
+    await sleep(250)
+    const lane = await this.rect(`${row} .cc-tlane`) || await this.rect(row)
+    if (!lane) throw new Error('Khong thay lane: ' + row)
+    const x = Math.round(row.includes('data-newtrack') ? lane.x + lane.width / 2 : lane.x + time * pps)
+    const y = Math.round(lane.y + lane.height / 2)
+    await this.send('Input.dispatchDragEvent', { type: 'dragOver', x, y, data })
+    await this.send('Input.dispatchDragEvent', { type: 'drop', x, y, data })
+  }
+
   /** Cac thao tac doc nhanh trang thai app. */
   text(selector) { return this.eval(`document.querySelector(${JSON.stringify(selector)})?.innerText ?? null`) }
   count(selector) { return this.eval(`document.querySelectorAll(${JSON.stringify(selector)}).length`) }
@@ -168,6 +234,8 @@ class App {
     await this.waitFor(`!!document.querySelector('.cc-recover')`, { label: 'banner khoi phuc' })
     await this.click('.cc-recover .cc-export')
     await this.waitFor(`document.querySelectorAll('.cc-clip').length > 0`, { label: 'clip tren timeline' })
+    // Tua truoc khi video xem truoc nap xong se bi su kien timeupdate ghi de, nen cho video san sang (neu clip dau la video)
+    await this.waitFor(`(() => { const v = document.querySelector('.cc-frame video'); return !v || v.readyState >= 2 })()`, { label: 'video xem truoc san sang', timeout: 20000 })
   }
 
   close() {
@@ -189,4 +257,4 @@ function projectOf(fixtures, extra = {}) {
   }
 }
 
-module.exports = { repo, sleep, ffmpeg, probeDuration, makeFixtures, launchApp, projectOf }
+module.exports = { repo, sleep, ffmpeg, probeDuration, probeStreams, pixelAt, rmsAt, makeFixtures, launchApp, projectOf }
