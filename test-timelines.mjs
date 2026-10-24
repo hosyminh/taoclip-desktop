@@ -158,6 +158,22 @@ test('emoji chu cu (du an v5) doi thanh sticker V2 trong timeline duy nhat', () 
   assert.equal(timeline.videoOverlays[0].start, 0.5)
 })
 
+test('moc: chuan hoa (sap theo thoi gian, bo muc hong, ten gon), mac dinh rong, vong luu / doc on dinh', () => {
+  const project = normalizeProject({ version: 6, assets: [], timelines: [
+    { id: 'a', markers: [{ id: 'm2', time: 5, name: '  Canh   hai ' }, { id: 'm1', time: 1.5 }, { time: -1, name: 'am' }, { time: 'x' }, null, { id: 'm2', time: 9, name: 'trung id' }, { time: 3, name: 'x'.repeat(200) }] },
+    { id: 'b' }
+  ] }, makeId)
+  const markers = project.timelines[0].markers
+  assert.deepEqual(markers.map((m) => m.time), [1.5, 3, 5, 9], 'sap theo thoi gian, bo thoi diem am / khong phai so')
+  assert.equal(markers.find((m) => m.time === 5).name, 'Canh hai')
+  assert.equal(markers.find((m) => m.time === 3).name.length, 60)
+  assert.equal(markers.find((m) => m.time === 1.5).name, '')
+  assert.equal(new Set(markers.map((m) => m.id)).size, 4, 'id duy nhat (id trung duoc cap lai)')
+  assert.deepEqual(project.timelines[1].markers, [])
+  assert.deepEqual(normalizeProject(JSON.parse(JSON.stringify(project)), makeId), project)
+  assert.ok(TIMELINE_KEYS.includes('markers'))
+})
+
 test('referencedPaths + libraryAfterRestore: undo trong tab nay khong lam mat media tab khac dang dung', () => {
   const other = { clips: [{ path: 'C:\\m\\Shared.mp4' }], videoOverlays: [{ path: 'o.png' }], audioItems: [{ path: 'a.wav' }] }
   assert.deepEqual([...referencedPaths(other)].sort(), ['c:/m/shared.mp4', 'a.wav', 'o.png'].sort())

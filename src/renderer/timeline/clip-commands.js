@@ -61,3 +61,32 @@ export function mergeClipCaptions(existing, fresh, clipId) {
   const kept = existing.filter((caption) => caption.clipId !== clipId)
   return [...kept, ...fresh].sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))
 }
+
+// ---- Xoa dan (ripple delete) mot doan [from, to) cua V1: cac lop khac lui theo ----
+
+/** Thoi gian sau khi cat doan [from, to): truoc doan giu nguyen, trong doan ve from, sau doan lui (to - from). */
+export function rippleTime(time, from, to) {
+  return time < from ? time : time < to ? from : time - (to - from)
+}
+
+/**
+ * Item (start + endOf(item)) khi xoa doan: nam tron trong doan -> bi xoa; con lai doi `start` theo rippleTime, giu nguyen do dai.
+ * skip(item) = true (vd. track bi khoa) -> giu nguyen. Tra ve { items, removed: [id] }.
+ */
+export function rippleItems(items, from, to, endOf, skip = () => false) {
+  const kept = [], removed = []
+  for (const item of items) {
+    if (skip(item)) { kept.push(item); continue }
+    const start = Number(item.start) || 0
+    if (start >= from - 1e-6 && endOf(item) <= to + 1e-6) { removed.push(item.id); continue }
+    kept.push({ ...item, start: rippleTime(start, from, to) })
+  }
+  return { items: kept, removed }
+}
+
+/** Chu / sticker chu (start, end): ca hai dau theo rippleTime; qua ngan thi bi xoa. */
+export function rippleOverlays(overlays, from, to, minLength = 0.05) {
+  return overlays
+    .map((overlay) => ({ ...overlay, start: rippleTime(overlay.start, from, to), end: rippleTime(overlay.end, from, to) }))
+    .filter((overlay) => overlay.end - overlay.start >= minLength)
+}

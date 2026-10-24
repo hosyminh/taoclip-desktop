@@ -19,6 +19,9 @@ export default function ShortcutsModal({ onClose }) {
           <kbd>Ctrl+C / V / D</kbd><span>{t('sc_copy')}</span>
           <kbd>F</kbd><span>{t('sc_freeze')}</span>
           <kbd>M</kbd><span>{t('sc_mute_item')}</span>
+          <kbd>Ctrl+🖱 / Ctrl+A</kbd><span>{t('sc_multi')}</span>
+          <kbd>Shift+Del</kbd><span>{t('sc_ripple')}</span>
+          <kbd>Shift+M · [ ]</kbd><span>{t('sc_marker')}</span>
           <kbd>Del</kbd><span>{t('sc_del')}</span>
           <kbd>+ / −</kbd><span>{t('sc_zoom')}</span>
           <kbd>Ctrl+Z / Y</kbd><span>{t('sc_undo')}</span>

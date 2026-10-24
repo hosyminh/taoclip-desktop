@@ -315,6 +315,21 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-v2-clip span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; }
 .cc-v2-clip button { border: 0; padding: 1px; display: inline-flex; color: #dceaff; background: transparent; cursor: pointer; }
 .cc-v2-clip.outside { border-color: #ffb25f; background: linear-gradient(135deg,#684524,#382817); }
+.cc-tlbar .tb-compact { display: inline-flex; align-items: center; gap: 3px; }
+.cc-tlbar .tb-compact.on { border-color: var(--accent); color: var(--accent); }
+.cc-tlbar .tb-compact small { font-size: 10px; font-weight: 700; }
+.cc-tlbar .tb-warn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid #ffb25f; border-radius: 7px; color: #ffcf99; font-size: 11px; white-space: nowrap; }
+.cc-marker { position: absolute; top: 0; height: 26px; z-index: 6; display: flex; align-items: flex-start; gap: 3px; margin-left: -4px; cursor: pointer; }
+.cc-marker .flag { width: 8px; height: 15px; background: #ffb25f; clip-path: polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%); }
+.cc-marker:hover .flag { background: #ffd34e; }
+.cc-marker .lbl { margin-top: 1px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #ffd9aa; text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+.cc-marker .name-edit { width: 110px; height: 16px; margin-top: 1px; padding: 0 4px; box-sizing: border-box; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--text); font-size: 10px; }
+.cc-marker-line { position: absolute; top: 26px; bottom: 0; width: 1px; background: rgba(255,178,95,.4); pointer-events: none; z-index: 4; }
+.cc-trim { position: absolute; top: 0; bottom: 0; width: 7px; z-index: 2; cursor: ew-resize; }
+.cc-trim.l { left: 0; }
+.cc-trim.r { right: 0; }
+.cc-trim:hover, .cc-v2-clip.sel .cc-trim, .cc-audio-item-clip.sel .cc-trim { background: rgba(255,255,255,.55); }
+.cc-v2-clip > button, .cc-audio-item-clip > button { margin-right: 6px; }
 .cc-v2-clip .cc-v2-resize { align-self: stretch; flex: 0 0 7px; margin: 0 -4px 0 0; border-right: 2px solid rgba(255,255,255,.7); cursor: ew-resize; }
 .cc-v2-controls { margin-top: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(30,48,70,.35); }
 .cc-v2-controls h4 { margin: 0 0 8px; color: #a9cbfa; font-size: 12px; }
@@ -340,6 +355,8 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-audio-item-clip.voice { background: linear-gradient(135deg,#704b28,#3f2b19); border-color: rgba(240,160,80,.5); }
 .cc-audio-item-clip.muted { opacity: .45; }
 .cc-audio-item-clip.outside { border-color: #ffb25f; }
+.cc-item-wave { position: absolute; inset: 0; background-repeat: no-repeat; opacity: .55; pointer-events: none; }
+.cc-audio-item-clip > span, .cc-audio-item-clip > button { position: relative; z-index: 1; }
 .cc-audio-item-clip span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .cc-audio-item-clip button { display: inline-flex; border: 0; padding: 1px; color: inherit; background: transparent; cursor: pointer; }
 .cc-mclip { position: absolute; top: 2px; left: 0; height: 36px; min-width: 40px; background: linear-gradient(135deg, #3a3560, #241f3e); border-radius: 7px; display: flex; align-items: center; padding: 0 8px; gap: 6px; overflow: hidden; cursor: pointer; border: 1px solid rgba(150,120,255,.35); }
@@ -384,7 +401,7 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-clip .strip { cursor: grab; }
 .cc-drop-ind { position: absolute; top: 24px; bottom: 0; width: 3px; background: #ffd34e; z-index: 9; pointer-events: none; box-shadow: 0 0 6px #ffd34e; }
 .cc-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 10; pointer-events: none; }
-.cc-playhead .head { position: absolute; top: -3px; left: -7px; width: 16px; height: 14px; background: var(--accent); border-radius: 4px; pointer-events: auto; cursor: ew-resize; }
+.cc-playhead .head { position: absolute; top: -3px; left: -7px; width: 16px; height: 14px; background: var(--accent); border-radius: 4px; pointer-events: none; }
 
 /* ---------- KEO GIAN PANEL ---------- */
 .rsz { flex-shrink: 0; z-index: 20; transition: background .12s; }
@@ -469,7 +486,8 @@ kbd { background: var(--panel3); border: 1px solid var(--line); border-bottom-wi
 .cc-ruler-row { position: sticky; top: 0; z-index: 12; display: flex; height: 26px; background: var(--panel); }
 .cc-tl-corner { position: sticky; left: 0; z-index: 13; flex: 0 0 var(--head-w); width: var(--head-w); box-sizing: border-box; background: var(--panel); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 /* Tha file / asset vao duong: o dich */
-.cc-newtrack { height: 22px; margin: 2px 0; box-sizing: border-box; display: flex; align-items: center; border: 1px dashed transparent; border-radius: 6px; font-size: 11px; color: transparent; }
+.cc-newtrack { height: 22px; margin: 2px 0; box-sizing: border-box; display: flex; align-items: center; border: 1px dashed transparent; border-radius: 6px; font-size: 11px; color: rgba(139,141,150,.55); cursor: pointer; }
+.cc-newtrack:hover { color: var(--text); border-color: rgba(58,122,254,.5); background: rgba(58,122,254,.08); }
 .cc-newtrack > span { position: sticky; left: calc(var(--head-w) + 12px); white-space: nowrap; }
 .cc-newtrack.on { border-color: rgba(58,122,254,.55); color: var(--muted); }
 .cc-newtrack.drop-hover { background: rgba(58,122,254,.22); border-color: var(--accent); color: var(--text); }
@@ -478,7 +496,8 @@ kbd { background: var(--panel3); border: 1px solid var(--line); border-bottom-wi
 .cc-lane-ind { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ffd34e; box-shadow: 0 0 6px #ffd34e; z-index: 8; pointer-events: none; }
 .cc-trow { display: flex; position: relative; border-bottom: 1px solid rgba(255,255,255,.05); }
 .cc-thead { position: sticky; left: 0; z-index: 9; flex: 0 0 var(--head-w); width: var(--head-w); box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 6px; background: var(--panel2); border-right: 1px solid var(--line); color: var(--muted); font-size: 11px; cursor: default; }
-.cc-thead .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: #9bc4ff; }
+.cc-thead .name-edit { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 20px; padding: 0 4px; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; font-size: 11px; }
+.cc-thead .name { cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: #9bc4ff; }
 .cc-trow.audio .cc-thead .name { color: #9fe0b4; }
 .cc-thead .tools { display: inline-flex; align-items: center; gap: 2px; }
 .cc-thead .tools button { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 2px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 10px; font-weight: 700; cursor: pointer; }
@@ -490,6 +509,7 @@ kbd { background: var(--panel3); border: 1px solid var(--line); border-bottom-wi
 .cc-trow.locked .cc-tlane > * { cursor: not-allowed; }
 .cc-trow.hidden .cc-tlane, .cc-trow.muted .cc-tlane { opacity: .4; }
 .cc-zone-divider { position: sticky; left: 0; height: 8px; background: #0b0b0e; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.cc-marquee { position: fixed; z-index: 150; border: 1px solid var(--accent); background: rgba(58,122,254,.16); pointer-events: none; }
 .cc-v2-clip.sel, .cc-audio-item-clip.sel { box-shadow: 0 0 0 2px #fff; }
 .cc-aclip.muted { opacity: .4; }
 .cc-clip.detached { border-color: #5fdc8a; }

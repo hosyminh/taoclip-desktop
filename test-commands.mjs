@@ -1,7 +1,7 @@
 // Kiem thu thuan cho cac lenh tren clip / item cua timeline:  node test-commands.mjs
 import assert from 'node:assert/strict'
-import { splitTimelineItem, splitClipSource, insertFreezeFrame, duplicateClipAfter, mergeClipCaptions, splitAnchoredCaptions, MIN_PIECE } from './src/renderer/timeline/clip-commands.js'
-import { HEAD_W, PPS_MIN, PPS_MAX, ZOOM_STEP, clampPps, fitPps, tickStep, tickLabel, TICK_MIN_GAP, thumbTiles } from './src/renderer/timeline/geometry.js'
+import { splitTimelineItem, splitClipSource, insertFreezeFrame, duplicateClipAfter, mergeClipCaptions, splitAnchoredCaptions, MIN_PIECE, rippleTime, rippleItems, rippleOverlays } from './src/renderer/timeline/clip-commands.js'
+import { HEAD_W, PPS_MIN, PPS_MAX, ZOOM_STEP, clampPps, fitPps, tickStep, tickLabel, TICK_MIN_GAP, thumbTiles, waveStyle } from './src/renderer/timeline/geometry.js'
 
 let n = 0
 const test = (name, fn) => { fn(); n++; console.log('  PASS ' + name) }
@@ -110,6 +110,38 @@ test('thumbTiles: so o theo be rong, khung theo doan in..out, khong vuot qua so 
   assert.deepEqual(thumbTiles({ in: 0, out: 10 }, 100, 0), [])
   assert.deepEqual(thumbTiles({ in: 0, out: 10 }, 0, 8), [])
   assert.ok(thumbTiles({ in: 5, out: 5 }, 500, 8).every((index) => index >= 0 && index < 8), 'doan rong khong ra chi so sai')
+})
+
+test('waveStyle: anh song am co the cat theo in..out va toc do, loop / thieu anh thi khong ve', () => {
+  const item = { in: 2, out: 6, sourceDuration: 10, speed: 1 }
+  const style = waveStyle(item, 80, 'file:///w.png')
+  assert.equal(style.backgroundSize, '800px 100%', 'ca file = 10s * 80px')
+  assert.equal(style.backgroundPosition, '-160px 0', 'bo qua 2s dau')
+  assert.equal(waveStyle({ ...item, speed: 2 }, 80, 'u').backgroundSize, '400px 100%', 'nhanh gap doi -> ngan mot nua')
+  assert.equal(waveStyle({ ...item, loop: true }, 80, 'u'), null)
+  assert.equal(waveStyle(item, 80, null), null)
+  assert.equal(waveStyle({ in: 0, out: 3 }, 100, 'u').backgroundSize, '300px 100%', 'thieu sourceDuration lay out')
+})
+
+test('rippleTime: truoc doan giu, trong doan ve dau doan, sau doan lui', () => {
+  assert.deepEqual([0, 2, 3, 4.5, 5, 9].map((time) => rippleTime(time, 3, 5)), [0, 2, 3, 3, 3, 7])
+})
+
+test('rippleItems: item nam tron trong doan bi xoa, item sau doan lui, item truoc doan va track khoa giu nguyen', () => {
+  const items = [
+    { id: 'before', start: 0, len: 2 }, { id: 'inside', start: 3.5, len: 1 }, { id: 'edge', start: 3, len: 2 },
+    { id: 'straddle', start: 4, len: 3 }, { id: 'after', start: 6, len: 2 }, { id: 'locked', start: 6, len: 1, locked: true }
+  ]
+  const result = rippleItems(items, 3, 5, (item) => item.start + item.len, (item) => !!item.locked)
+  assert.deepEqual(result.removed, ['inside', 'edge'])
+  const byId = Object.fromEntries(result.items.map((item) => [item.id, item.start]))
+  assert.deepEqual(byId, { before: 0, straddle: 3, after: 4, locked: 6 })
+  assert.equal(items.find((item) => item.id === 'after').start, 6, 'khong sua mang goc')
+})
+
+test('rippleOverlays: chu cat hai dau theo rippleTime, qua ngan thi xoa', () => {
+  const result = rippleOverlays([{ id: 'a', start: 6, end: 8 }, { id: 'b', start: 3.2, end: 4.8 }, { id: 'c', start: 1, end: 4 }], 3, 5)
+  assert.deepEqual(result.map((x) => [x.id, x.start, x.end]), [['a', 4, 6], ['c', 1, 3]])
 })
 
 console.log(`\n================  ${n} PASS  ================`)

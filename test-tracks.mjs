@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   normalizeTracks, defaultTracks, makeTrack, MIN_LANES, isCoreTrack, videoTracksOf, audioTracksOf, nextTrackNumber, layerIndex, withLayerZIndex,
   audibleTrackIds, visibleVideoTrackIds, itemSpan, spansOverlap, occupiedSpans, choosePlacement, assignDefaultTracks,
-  clipAudioSpans, buildDetachedAudioItem, insertIndexForTime, parseTrackId
+  clipAudioSpans, buildDetachedAudioItem, insertIndexForTime, parseTrackId, peakOverlap, MANY_LAYERS
 } from './src/renderer/track-model.js'
 import { normalizeProject as normalizeProjectFull, activeTimeline } from './src/renderer/project-model.js'
 // Cac kiem tra cu doc noi dung o muc du an: tran noi dung timeline dang mo len de giu nguyen cach viet.
@@ -131,6 +131,16 @@ test('audibleTrackIds / visibleVideoTrackIds theo mute, solo, hidden', () => {
   assert.deepEqual([...visibleVideoTrackIds(tracks)], ['V1', 'V3', 'V4'])
   tracks = normalizeTracks([{ id: 'A1' }, { id: 'A2', solo: true }, { id: 'A3', muted: true, solo: true }])
   assert.deepEqual([...audibleTrackIds(tracks)], ['A2'], 'co solo -> chi nghe track solo chua tat tieng')
+})
+
+test('peakOverlap: so item chong nhau nhieu nhat; sat nhau khong tinh; rong / rong 0 thi bo qua', () => {
+  assert.equal(peakOverlap([]), 0)
+  assert.equal(peakOverlap([item('a', 'V2', 0, 3)]), 1)
+  assert.equal(peakOverlap([item('a', 'V2', 0, 3), item('b', 'V3', 3, 2)]), 1, 'sat nhau')
+  assert.equal(peakOverlap([item('a', 'V2', 0, 3), item('b', 'V3', 1, 3), item('c', 'V4', 2, 3), item('d', 'V5', 10, 1)]), 3)
+  assert.equal(peakOverlap([item('a', 'V2', 0, 0), item('b', 'V3', 1, 0)]), 0)
+  assert.equal(peakOverlap([item('a', 'V2', 1, 2, { loop: true }), item('b', 'V3', 2, 1)], { totalDuration: 10 }), 2, 'loop keo toi het timeline')
+  assert.equal(MANY_LAYERS, 6)
 })
 
 test('clipAudioSpans chi lay clip co tieng va chua tach; buildDetachedAudioItem giu in/out/toc do/vi tri', () => {

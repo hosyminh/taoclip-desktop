@@ -142,6 +142,23 @@ export function assignDefaultTracks({ tracks, videoItems = [], audioItems = [], 
   }
 }
 
+// ---------- Do tai: so lop hinh chong nhau ----------
+
+export const MANY_LAYERS = 6 // tren muc nay (tinh ca V1) xuat va xem truoc se cham ro ret
+
+/** So item chong nhau nhieu nhat tai mot thoi diem (item sat nhau khong tinh la chong). */
+export function peakOverlap(items, { totalDuration = 0 } = {}) {
+  const events = []
+  for (const item of items) {
+    const { start, end } = itemSpan(item, { totalDuration })
+    if (end - start > EPSILON) events.push([start, 1], [end, -1])
+  }
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  let current = 0, peak = 0
+  for (const [, delta] of events) { current += delta; if (current > peak) peak = current }
+  return peak
+}
+
 // ---------- Clip V1 <-> tieng ----------
 
 /** Khoang A1 bi chiem boi tieng goc cua cac clip V1 (chua tach). */

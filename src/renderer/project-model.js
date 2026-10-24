@@ -32,7 +32,8 @@ const DEFAULTS = Object.freeze({
   keepSegments: null,
   autoCut: false,
   autoInfo: null,
-  silenceParams: { threshold: -30, minSilence: 0.4, pad: 0.06 }
+  silenceParams: { threshold: -30, minSilence: 0.4, pad: 0.06 },
+  markers: []
 })
 
 function defaultId(prefix, index) {
@@ -290,6 +291,17 @@ function normalizeTimeline(migrated, makeId) {
     minSilence: finite(silenceSource.minSilence ?? 0.4, 'silenceParams.minSilence', { min: 0.1, max: 5 }),
     pad: finite(silenceSource.pad ?? 0.06, 'silenceParams.pad', { min: 0, max: 1 })
   }
+  // Moc tren thuoc thoi gian: thoi diem >= 0, ten ngan; sap theo thoi gian, bo muc hong
+  const markerIds = new Set()
+  const normalizedMarkers = (Array.isArray(migrated.markers) ? migrated.markers : [])
+    .filter((marker) => marker && typeof marker === 'object' && Number.isFinite(Number(marker.time)) && Number(marker.time) >= 0)
+    .map((marker, index) => {
+      let id = typeof marker.id === 'string' && marker.id ? marker.id : makeId('marker', index)
+      if (markerIds.has(id)) id = makeId('marker', index)
+      markerIds.add(id)
+      return { id, time: Number(marker.time), name: typeof marker.name === 'string' ? marker.name.replace(/\s+/g, ' ').trim().slice(0, 60) : '' }
+    })
+    .sort((a, b) => a.time - b.time)
   const captionTimebase = migrated.captionTimebase || 'timeline'
   if (!['timeline', 'timeline-legacy', 'source-legacy'].includes(captionTimebase)) throw new Error('Project không hợp lệ: captionTimebase')
   let keepSegments = null
@@ -349,6 +361,7 @@ function normalizeTimeline(migrated, makeId) {
     captionTimebase,
     keepSegments,
     silenceParams,
+    markers: normalizedMarkers,
     autoCut: !!migrated.autoCut,
     autoInfo
   }

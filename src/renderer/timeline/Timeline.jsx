@@ -1,24 +1,47 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Scissors, Undo2, Redo2, Keyboard, Minus, Plus, Eye, EyeOff, Lock, Unlock, Volume2, VolumeX, X } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, TriangleAlert, Flag, Scissors, Undo2, Redo2, Keyboard, Minus, Plus, Eye, EyeOff, Lock, Unlock, Volume2, VolumeX, X } from 'lucide-react'
 import { useI18n } from '../i18n.jsx'
 import { fmt, fileUrl, FRAME } from '../utils.js'
-import { audioTracksOf, videoTracksOf, clipAudioSpans, insertIndexForTime, isCoreTrack, MAIN_VIDEO_TRACK, MAIN_AUDIO_TRACK } from '../track-model.js'
-import { HEAD_W, ROW_HEIGHT, TAIL_PX, audioItemLength, tickLabel, clientXToTime, thumbTiles } from './geometry.js'
+import { audioTracksOf, videoTracksOf, clipAudioSpans, insertIndexForTime, isCoreTrack, peakOverlap, visibleVideoTrackIds, MANY_LAYERS, MAIN_VIDEO_TRACK, MAIN_AUDIO_TRACK } from '../track-model.js'
+import { HEAD_W, ROW_HEIGHT, TAIL_PX, audioItemLength, tickLabel, clientXToTime, thumbTiles, waveStyle } from './geometry.js'
 import { stickerUrl } from '../sticker-catalog.js'
 
 // Timeline hai vung: hinh o tren (V_n ... V2, V1), am thanh o duoi (A1, A2 ...). Chi hien thi; moi thao tac di qua callback cua App.
 export default function Timeline({
-  tlH, onResizePanel, tabs, overlayThumbs, laneDrag, onStartClipAudioDrag,
+  tlH, onResizePanel, tabs, overlayThumbs, audioWaves, laneDrag, onStartClipAudioDrag, multiKeys, onMarqueeStart,
+  compact = false, onToggleCompact,
+  markers = [], onAddMarker, onMarkerContext, onMarkerRename, renamingMarkerId, onRenameMarkerStart, onRenameMarkerEnd,
   tracks, onTrackPatch, onAddTrack, onRemoveTrack,
   layout, selId, onSelectClip, videoOverlays, audioItems, overlays, selOv, selItem, onSelectItem,
   pps, scrollRef, totalDuration, current, ticks, dragInsert, hasClips,
   snapEnabled, onToggleSnap, canUndo, canRedo, onUndo, onRedo, onSplit, onShowKeys, onZoomOut, onZoomIn, onFit,
   onSeekClick, onStartScrub, onStartTrim, onStartReorder, onRetryWave,
-  onSeek, onStartV2Move, onStartV2Resize, onRemoveV2, onStartAudioDrag, onRemoveAudio, onStartOverlayMove, onStartOverlayResize,
+  onSeek, onStartV2Move, onStartItemTrim, onRemoveV2, onStartAudioDrag, onRemoveAudio, onStartOverlayMove, onStartOverlayResize,
   onItemContextMenu, dragActive = false, onLaneDrop, canDetach = false, isDetached = false, onDetachAudio
 }) {
   const { t } = useI18n()
   const [hoverLane, setHoverLane] = useState(null)
+  const [renamingTrack, setRenamingTrack] = useState(null) // { id, value }
+  const [markerDraft, setMarkerDraft] = useState(null) // { id, value }: ten moc dang go
+  const markerDone = useRef(false)
+  const markerValue = renamingMarkerId ? (markerDraft?.id === renamingMarkerId ? markerDraft.value : markers.find((marker) => marker.id === renamingMarkerId)?.name ?? '') : ''
+  useEffect(() => { markerDone.current = false }, [renamingMarkerId])
+  const finishMarkerRename = (save) => {
+    if (markerDone.current || !renamingMarkerId) return
+    markerDone.current = true
+    if (save) onMarkerRename?.(renamingMarkerId, markerValue)
+    setMarkerDraft(null); onRenameMarkerEnd?.()
+  }
+  const renameDone = useRef(false) // Enter / Escape roi blur: chi chot mot lan
+  const finishRename = (save) => {
+    if (renameDone.current || !renamingTrack) return
+    renameDone.current = true
+    const { id, value } = renamingTrack
+    setRenamingTrack(null)
+    if (!save) return
+    const name = value.trim().slice(0, 40) || id // de trong = ten mac dinh
+    if (name !== (tracks.find((track) => track.id === id)?.name)) onTrackPatch(id, { name })
+  }
   const [dropAt, setDropAt] = useState(null) // { key, time }: vach bao thoi diem se tha vao tren duong dang ruoc toi
   const autoScroll = useRef({ vx: 0, vy: 0, timer: null })
   const stopAutoScroll = () => {
@@ -79,11 +102,20 @@ export default function Timeline({
     const time = trackId === MAIN_VIDEO_TRACK ? (index < layout.length ? layout[index].start : totalDuration) : at
     return <div className="cc-lane-ind" style={{ left: time * pps }} />
   }
-  const videoRows = videoTracksOf(tracks).slice().reverse()
-  const audioRows = audioTracksOf(tracks)
+  // Che do thu gon: an cac duong phu / tieng dang trong (V1, A1 luon hien); khi dang keo hoac dang tro toi thi hien lai de tha vao
+  const usedLaneIds = new Set([...videoOverlays, ...audioItems].map((item) => item.trackId))
+  const showLane = (track) => !compact || dragActive || track.id === MAIN_VIDEO_TRACK || track.id === MAIN_AUDIO_TRACK || usedLaneIds.has(track.id)
+    || hoverLane === track.id || laneDrag?.trackId === track.id || renamingTrack?.id === track.id
+  const videoRows = videoTracksOf(tracks).slice().reverse().filter(showLane)
+  const audioRows = audioTracksOf(tracks).filter(showLane)
+  const hiddenLanes = compact ? tracks.filter((track) => !showLane(track)).length : 0
+  // So lop hinh chong nhau nhieu nhat (V1 + cac lop phu dang hien): qua nhieu thi xuat / xem truoc cham
+  const visibleIds = visibleVideoTrackIds(tracks)
+  const peakLayers = (hasClips ? 1 : 0) + peakOverlap(videoOverlays.filter((item) => visibleIds.has(item.trackId)), { totalDuration })
   const a1Spans = clipAudioSpans(layout)
   const stop = (event) => event.stopPropagation()
-  const isSel = (kind, id) => selItem?.kind === kind && selItem.id === id
+  const isSel = (kind, id) => (selItem?.kind === kind && selItem.id === id) || !!multiKeys?.has(`${kind}:${id}`)
+  const withModifier = (event) => event.ctrlKey || event.metaKey || event.shiftKey // Ctrl / Shift + click: chon them, khong tua
   const itemsOn = (list, trackId) => list.filter((item) => item.trackId === trackId)
   const usedIds = new Set([...videoOverlays, ...audioItems].map((item) => item.trackId))
 
@@ -91,8 +123,17 @@ export default function Timeline({
     const removable = !isCoreTrack(track.id) && !usedIds.has(track.id)
     return (
       <div className="cc-thead" onClick={stop} onMouseDown={stop} onDoubleClick={stop}>
-        <span className="name" title={track.name}>{track.name}</span>
-        <span className="tools">
+        {renamingTrack?.id === track.id
+          ? (
+            <input className="name-edit" autoFocus maxLength={40} value={renamingTrack.value} aria-label={t('track_rename')}
+              ref={(el) => { if (el && !el.dataset.sel) { el.dataset.sel = '1'; el.select() } }}
+              onChange={(event) => setRenamingTrack({ id: track.id, value: event.target.value })}
+              onBlur={() => finishRename(true)}
+              onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Enter') finishRename(true); else if (event.key === 'Escape') finishRename(false) }} />
+          )
+          : <span className="name" title={`${track.name} · ${t('track_rename_tip')}`}
+            onDoubleClick={(event) => { event.stopPropagation(); renameDone.current = false; setRenamingTrack({ id: track.id, value: track.name }) }}>{track.name}</span>}
+        <span className="tools" style={renamingTrack?.id === track.id ? { display: 'none' } : undefined}>
           {track.kind === 'video'
             ? <button className={track.hidden ? 'on' : ''} title={t('track_hide')} onClick={() => onTrackPatch(track.id, { hidden: !track.hidden })}>{track.hidden ? <EyeOff size={12} /> : <Eye size={12} />}</button>
             : <>
@@ -115,9 +156,9 @@ export default function Timeline({
         {renderHeader(track)}
         <div className="cc-tlane" style={{ width: tlWidth }}>{dropIndicator(track.id)}
           {layout.map((seg) => (
-            <div key={seg.key} className={`cc-clip ${selId === seg.id ? 'sel' : ''} ${seg.clip?.audioDetached ? 'detached' : ''} ${seg.clip?.enhance ? 'enhanced' : ''}`} data-clip-id={seg.id}
+            <div key={seg.key} className={`cc-clip ${selId === seg.id || multiKeys?.has(`clip:${seg.id}`) ? 'sel' : ''} ${seg.clip?.audioDetached ? 'detached' : ''} ${seg.clip?.enhance ? 'enhanced' : ''}`} data-clip-id={seg.id}
               style={{ left: seg.start * pps, width: (seg.end - seg.start) * pps }}
-              onClick={(e) => { e.stopPropagation(); onSelectClip(seg.id); onSeek(seg.start) }}
+              onClick={(e) => { e.stopPropagation(); onSelectClip(seg.id, e); if (!withModifier(e)) onSeek(seg.start) }}
               onContextMenu={(e) => onItemContextMenu?.(e, { kind: 'clip', id: seg.id })}>
               <div className="h l" onMouseDown={(e) => onStartTrim(seg.clip, 'l', e)} />
               <div className="strip" onMouseDown={(e) => onStartReorder(seg, e)} title={seg.clip.name}>
@@ -154,11 +195,12 @@ export default function Timeline({
                 title={`${item.name || item.path} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1')}` : ''}`}
                 style={{ left: item.start * pps, width: Math.max(24, itemDuration * pps) }}
                 onMouseDown={(event) => onStartV2Move(item, event)}
-                onClick={(event) => { event.stopPropagation(); onSelectItem({ kind: 'v2', id: item.id }); onSeek(item.start) }}
+                onClick={(event) => { event.stopPropagation(); onSelectItem({ kind: 'v2', id: item.id }, event); if (!withModifier(event)) onSeek(item.start) }}
                 onContextMenu={(e) => onItemContextMenu?.(e, { kind: 'v2', id: item.id })}>
                 {renderItemThumbs(item, Math.max(24, itemDuration * pps))}
                 <span>{item.name || item.path.split(/[\\/]/).pop()}</span>
-                <button className="cc-v2-resize" onMouseDown={(event) => onStartV2Resize(item, event)} title={t('v2_resize_tip')} />
+                <div className="cc-trim l" onMouseDown={(event) => onStartItemTrim('v2', item, 'l', event)} title={t('item_trim_tip')} />
+                <div className="cc-trim r" onMouseDown={(event) => onStartItemTrim('v2', item, 'r', event)} title={t('item_trim_tip')} />
                 <button onClick={(event) => { event.stopPropagation(); onRemoveV2(item.id) }} title={t('v2_remove_tip')}><X size={11} /></button>
               </div>
             )
@@ -192,9 +234,12 @@ export default function Timeline({
               <div key={item.id} className={`cc-audio-item-clip ${item.track} ${item.muted ? 'muted' : ''} ${outside ? 'outside' : ''} ${isSel('audio', item.id) ? 'sel' : ''}`} data-item-id={item.id}
                 style={{ left: item.start * pps, width: Math.max(28, length * pps) }}
                 onMouseDown={(event) => onStartAudioDrag(item, event)}
-                onClick={(event) => { event.stopPropagation(); onSelectItem({ kind: 'audio', id: item.id }); onSeek(item.start) }}
+                onClick={(event) => { event.stopPropagation(); onSelectItem({ kind: 'audio', id: item.id }, event); if (!withModifier(event)) onSeek(item.start) }}
                 onContextMenu={(e) => onItemContextMenu?.(e, { kind: 'audio', id: item.id })}
                 title={`${item.name} · ${fmt(item.start)}${outside ? ` · ${t('v2_outside_v1_short')}` : ''}`}>
+                {(() => { const style = waveStyle(item, pps, audioWaves?.[item.path] ? fileUrl(audioWaves[item.path]) : null); return style ? <div className="cc-item-wave" style={style} /> : null })()}
+                {!item.loop && <div className="cc-trim l" onMouseDown={(event) => onStartItemTrim('audio', item, 'l', event)} title={t('item_trim_tip')} />}
+                {!item.loop && <div className="cc-trim r" onMouseDown={(event) => onStartItemTrim('audio', item, 'r', event)} title={t('item_trim_tip')} />}
                 <span>{item.name}</span>
                 <button onClick={(event) => { event.stopPropagation(); onRemoveAudio(item.id) }} title={t('audio_item_remove_tip')}><X size={11} /></button>
               </div>
@@ -217,6 +262,9 @@ export default function Timeline({
         <button onClick={onUndo} disabled={!canUndo} title={t('undo')}><Undo2 size={14} /></button>
         <button onClick={onRedo} disabled={!canRedo} title={t('redo')}><Redo2 size={14} /></button>
         <button onClick={onShowKeys} title={t('keys_btn')}><Keyboard size={14} /></button>
+        <button onClick={onAddMarker} disabled={!hasClips} title={t('marker_add')} className="tb-marker"><Flag size={14} /></button>
+        <button onClick={onToggleCompact} className={compact ? 'tb-compact on' : 'tb-compact'} title={t('tl_compact_tip')} aria-pressed={compact}>{compact ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}{compact && hiddenLanes > 0 ? <small>{hiddenLanes}</small> : null}</button>
+        {peakLayers > MANY_LAYERS && <span className="tb-warn" title={t('tl_many_layers_tip', { n: peakLayers })}><TriangleAlert size={13} /> {t('tl_many_layers', { n: peakLayers })}</span>}
         <button className="tb-ic" onClick={() => onAddTrack('video')} title={t('track_add_video')}>{t('track_add_video')}</button>
         <button className="tb-ic" onClick={() => onAddTrack('audio')} title={t('track_add_audio')}>{t('track_add_audio')}</button>
         <div className="sp" />
@@ -228,12 +276,30 @@ export default function Timeline({
         </div>
       </div>
 
-      <div className="cc-tlscroll" ref={scrollRef} onClick={onSeekClick} onDragOver={scrollWhileDragging} onDragLeave={stopAutoScroll}>
+      <div className="cc-tlscroll" ref={scrollRef} onClick={onSeekClick} onMouseDown={onMarqueeStart} onDragOver={scrollWhileDragging} onDragLeave={stopAutoScroll}>
         <div className="cc-tlinner" style={{ width: HEAD_W + tlWidth }}>
           <div className="cc-ruler-row">
             <div className="cc-tl-corner" />
             <div className="cc-ruler" style={{ width: tlWidth }} onMouseDown={onStartScrub}>
               {ticks.map((s) => <span key={s} className="tick" style={{ left: s * pps }}>{tickLabel(s)}</span>)}
+              {markers.map((marker) => (
+                <div key={marker.id} className="cc-marker" data-marker-id={marker.id} style={{ left: marker.time * pps }}
+                  title={`${marker.name || t('marker_default')} · ${fmt(marker.time)}`}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => { event.stopPropagation(); onSeek(marker.time) }}
+                  onDoubleClick={(event) => { event.stopPropagation(); onRenameMarkerStart?.(marker.id) }}
+                  onContextMenu={(event) => onMarkerContext?.(event, marker.id)}>
+                  <span className="flag" />
+                  {renamingMarkerId === marker.id
+                    ? <input className="name-edit" autoFocus maxLength={60} value={markerValue} aria-label={t('marker_rename')}
+                      ref={(el) => { if (el && !el.dataset.sel) { el.dataset.sel = '1'; el.select() } }}
+                      onChange={(event) => setMarkerDraft({ id: marker.id, value: event.target.value })}
+                      onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+                      onBlur={() => finishMarkerRename(true)}
+                      onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Enter') finishMarkerRename(true); else if (event.key === 'Escape') finishMarkerRename(false) }} />
+                    : marker.name ? <span className="lbl">{marker.name}</span> : null}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -254,14 +320,15 @@ export default function Timeline({
                 </div>
               </div>
             )}
-            {<div className={`cc-newtrack video ${dragActive ? 'on' : ''} ${hoverLane === 'NEW-V' ? 'drop-hover' : ''}`} data-newtrack="video" {...dropProps({ kind: 'video', forceNew: true }, 'NEW-V')}><span>{t('track_drop_new_video')}</span></div>}
+            {<div className={`cc-newtrack video ${dragActive ? 'on' : ''} ${hoverLane === 'NEW-V' ? 'drop-hover' : ''}`} data-newtrack="video" onClick={() => onAddTrack('video')} title={t('track_add_video')} {...dropProps({ kind: 'video', forceNew: true }, 'NEW-V')}><span>{dragActive ? t('track_drop_new_video') : t('track_add_video')}</span></div>}
             {videoRows.map((track) => (track.id === MAIN_VIDEO_TRACK ? renderMainLane(track) : renderOverlayLane(track)))}
           </div>
           <div className="cc-zone-divider" />
           <div className="cc-zone audio">
             {audioRows.map((track) => renderAudioLane(track))}
-            {<div className={`cc-newtrack audio ${dragActive ? 'on' : ''} ${hoverLane === 'NEW-A' ? 'drop-hover' : ''}`} data-newtrack="audio" {...dropProps({ kind: 'audio', forceNew: true }, 'NEW-A')}><span>{t('track_drop_new_audio')}</span></div>}
+            {<div className={`cc-newtrack audio ${dragActive ? 'on' : ''} ${hoverLane === 'NEW-A' ? 'drop-hover' : ''}`} data-newtrack="audio" onClick={() => onAddTrack('audio')} title={t('track_add_audio')} {...dropProps({ kind: 'audio', forceNew: true }, 'NEW-A')}><span>{dragActive ? t('track_drop_new_audio') : t('track_add_audio')}</span></div>}
           </div>
+          {markers.map((marker) => <div key={'line-' + marker.id} className="cc-marker-line" style={{ left: HEAD_W + marker.time * pps }} />)}
           {hasClips && <div className="cc-playhead" style={{ left: HEAD_W + current * pps }}><div className="head" onMouseDown={onStartScrub} /></div>}
         </div>
       </div>

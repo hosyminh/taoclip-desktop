@@ -9,7 +9,7 @@
 ## Chức năng
 
 - Nhập video, ảnh, GIF và audio; sắp xếp, trim, split, crop và thay đổi tốc độ clip.
-- Dựng timeline nhiều track (hình ở trên, tiếng ở dưới): kéo thả file vào đúng track và thời điểm, tách âm thanh khỏi video, menu chuột phải (sao chép, nhân bản, tách, khung hình dừng, tăng cường…), thêm chữ, sticker, phụ đề, nhạc nền và chuyển cảnh.
+- Dựng timeline nhiều track (hình ở trên, tiếng ở dưới): kéo thả file vào đúng track và thời điểm, tách âm thanh khỏi video, menu chuột phải (sao chép, nhân bản, tách, khung hình dừng, tăng cường…), chọn nhiều và kéo nhóm, cắt mép bằng chuột, xóa dồn, mốc, thêm chữ, sticker, phụ đề, nhạc nền và chuyển cảnh.
 - Nhiều timeline trong một project (tab Timeline 1, Timeline 2…) để làm nhiều tập hoặc nhiều clip; thư viện media dùng chung, mỗi tab có lịch sử hoàn tác riêng.
 - Phân tích khoảng lặng, tạo phụ đề, đọc văn bản và xử lý nền bằng các model AI tải riêng.
 - Lưu/mở project, relink media, thu thập media để chuyển project, undo/redo và khôi phục phiên.

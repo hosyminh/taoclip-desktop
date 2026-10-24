@@ -35,6 +35,14 @@ export function clientXToTime(clientX, scrollEl, pps) {
   return (clientX - rect.left + scrollEl.scrollLeft - HEAD_W) / pps
 }
 
+/** Style anh song am (ca file) de chi lo ra doan in..out cua item audio, dung toc do; loop thi khong ve (doan lap). */
+export function waveStyle(item, pps, url) {
+  if (!url || item.loop) return null
+  const speed = Number(item.speed) > 0 ? Number(item.speed) : 1
+  const source = Math.max(Number(item.sourceDuration) || 0, Number(item.out) || 0, 0.001)
+  return { backgroundImage: `url(${url})`, backgroundSize: `${(source * pps) / speed}px 100%`, backgroundPosition: `${-((Number(item.in) || 0) * pps) / speed}px 0` }
+}
+
 export const THUMB_TILE_W = 64 // be rong toi da mot khung hinh thu nho tren item V2+ (px)
 
 /**

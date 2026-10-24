@@ -314,7 +314,7 @@ scenario('menu chuot phai: du muc, nhan ban, sao chep + dan, tach Ctrl+B, khoa t
     await app.restoreProject()
     await app.rightClick('.cc-clip', 0)
     await app.waitFor(`!!document.querySelector('.cc-ctxmenu')`, { label: 'menu' })
-    check('menu co du 12 muc theo thu tu', (await ctxIds(app)).join() === 'copy,duplicate,paste,split,freeze,enhance,detach,save-audio,captions,mute,lock,delete', (await ctxIds(app)).join())
+    check('menu clip V1 co du 13 muc theo thu tu (12 lenh + xoa dan)', (await ctxIds(app)).join() === 'copy,duplicate,paste,split,freeze,enhance,detach,save-audio,captions,mute,lock,delete,ripple', (await ctxIds(app)).join())
     check('Dan bi khoa khi chua sao chep gi', await ctxDisabled(app, 'paste'))
     check('Tach / Freeze bi khoa khi dau phat o mep clip', (await ctxDisabled(app, 'split')) && (await ctxDisabled(app, 'freeze')))
     await app.click('.cc-ctxmenu [data-ctx="duplicate"]')

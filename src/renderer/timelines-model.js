@@ -5,7 +5,7 @@
 export const TIMELINE_KEYS = Object.freeze([
   'ratio', 'filterKey', 'filterIntensity', 'mode', 'captions', 'burnCaptions', 'overlays', 'videoOverlays', 'audioItems', 'tracks',
   'transition', 'transitionStyle', 'transitionDuration', 'clips', 'ducking', 'origVolume', 'syncMode', 'slideDur',
-  'ttsEngine', 'ttsVoice', 'ttsRate', 'ttsPitch', 'aiEdited', 'keepSegments', 'autoCut', 'autoInfo', 'silenceParams', 'captionTimebase'
+  'ttsEngine', 'ttsVoice', 'ttsRate', 'ttsPitch', 'aiEdited', 'keepSegments', 'autoCut', 'autoInfo', 'silenceParams', 'captionTimebase', 'markers'
 ])
 
 export const MAX_TIMELINES = 12
