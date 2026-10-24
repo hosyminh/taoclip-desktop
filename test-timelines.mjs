@@ -205,6 +205,17 @@ test('am luong clip V1 va can bang item tieng: mac dinh, gioi han, giu qua vong 
   assert.equal(round.timelines[0].clips[0].volume, 0.5)
 })
 
+test('tieng cua video phu: file cu tat tieng (giu nguyen ban xuat cu), item moi tu chon, anh / sticker luon tat', () => {
+  const make = (extra) => normalizeProject({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [{ id: 'o', path: 'a.mp4', kind: 'video', start: 0, out: 3, ...extra }] }] }, makeId).timelines[0].videoOverlays[0]
+  assert.deepEqual([make({}).audioMuted, make({}).volume], [true, 1], 'thieu truong -> tat tieng (file cu)')
+  assert.equal(make({ audioMuted: false }).audioMuted, false)
+  assert.equal(make({ audioMuted: false, volume: 1.5 }).volume, 1.5)
+  const image = normalizeProject({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [{ id: 'i', path: 'a.png', kind: 'image', out: 3, audioMuted: false }, { id: 's', sticker: 'twemoji/1f600', out: 3, audioMuted: false }] }] }, makeId).timelines[0].videoOverlays
+  assert.deepEqual(image.map((item) => item.audioMuted), [true, true], 'anh / sticker khong co tieng')
+  for (const bad of [{ volume: 2.5 }, { volume: -1 }, { volume: 'x' }]) assert.throws(() => make(bad), /videoOverlays\[0\]\.volume/)
+  assert.deepEqual(normalizeProject(JSON.parse(JSON.stringify({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [make({ audioMuted: false, volume: 0.5 })] }] })), makeId).timelines[0].videoOverlays[0].volume, 0.5)
+})
+
 test('referencedPaths + libraryAfterRestore: undo trong tab nay khong lam mat media tab khac dang dung', () => {
   const other = { clips: [{ path: 'C:\\m\\Shared.mp4' }], videoOverlays: [{ path: 'o.png' }], audioItems: [{ path: 'a.wav' }] }
   assert.deepEqual([...referencedPaths(other)].sort(), ['c:/m/shared.mp4', 'a.wav', 'o.png'].sort())

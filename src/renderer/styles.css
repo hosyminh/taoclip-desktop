@@ -317,6 +317,7 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-v2-track { height: 40px; margin-top: 4px; }
 .cc-track-label { position: absolute; left: 0; top: -5px; color: #9bc4ff; font-size: 9px; z-index: 1; }
 .cc-v2-clip { position: absolute; top: 3px; height: 36px; display: flex; align-items: center; gap: 5px; padding: 0 5px; overflow: hidden; border: 1px solid rgba(100,165,255,.6); border-radius: 6px; color: #dceaff; background: linear-gradient(135deg,#234c79,#182f4b); cursor: pointer; }
+.cc-v2-clip .ov-audio { position: relative; z-index: 1; flex: none; color: #dceaff; filter: drop-shadow(0 1px 1px rgba(0,0,0,.9)); }
 .cc-v2-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; pointer-events: none; }
 .cc-v2-thumbs img { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; }
 .cc-v2-thumbs.flat { background-size: auto 100%; background-repeat: repeat-x; background-position: left center; }

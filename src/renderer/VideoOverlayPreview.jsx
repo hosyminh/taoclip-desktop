@@ -4,7 +4,7 @@ import { stickerUrl } from './sticker-catalog.js'
 import { attachDocumentMouseDrag } from './drag-utils.js'
 import { fadeFactor } from './track-model.js'
 
-export default function VideoOverlayPreview({ item, current, playing, onEditStart, onEditEnd, onPositionChange, safeZone = false }) {
+export default function VideoOverlayPreview({ item, current, playing, onEditStart, onEditEnd, onPositionChange, safeZone = false, volume = 1, muted = false }) {
   const videoRef = useRef(null)
   const [failed, setFailed] = useState(false)
   const active = current >= item.start && current < item.start + (item.out - item.in) / item.speed
@@ -20,6 +20,16 @@ export default function VideoOverlayPreview({ item, current, playing, onEditStar
     if (playing && video.paused) video.play().catch(() => setFailed(true))
     else video.pause()
   }, [active, current, item.in, item.kind, item.speed, item.start, playing])
+
+  // Tieng cua video phu: nghe khi bat tieng (toi da 100% trong the video, ban xuat khuech dai dung gia tri), theo mo vao / ra
+  const wantsSound = item.kind === 'video' && item.audioMuted === false && !muted
+  const soundLevel = Math.min(1, Math.max(0, volume * (item.volume ?? 1) * fadeFactor(item, current)))
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.muted = !wantsSound
+    video.volume = wantsSound ? soundLevel : 0
+  }, [wantsSound, soundLevel, active])
 
   if (!active || item.missing || failed) return null
   const style = {
@@ -43,7 +53,7 @@ export default function VideoOverlayPreview({ item, current, playing, onEditStar
     attachDocumentMouseDrag(move, up)
   }
   if (item.kind === 'image') return <img className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={item.sticker ? stickerUrl(item.sticker) : fileUrl(item.path)} alt="" draggable={false} style={style} onMouseDown={beginPositionDrag} onError={() => setFailed(true)} />
-  return <video ref={videoRef} className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={fileUrl(item.path)} muted playsInline preload="auto" style={style}
+  return <video ref={videoRef} className={`cc-v2-preview ${outsideSafe ? 'unsafe' : ''}`} src={fileUrl(item.path)} muted={!wantsSound} playsInline preload="auto" style={style}
     onMouseDown={beginPositionDrag}
     onLoadedMetadata={(event) => {
       const video = event.currentTarget

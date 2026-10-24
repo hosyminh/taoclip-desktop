@@ -834,7 +834,7 @@ export default function App() {
       id: makeEntityId('video-overlay'), path: clip.path, name: clip.name, kind: isImg(clip) ? 'image' : 'video',
       start: current, in: isImg(clip) ? 0 : clip.in, out: clip.out, speed: isImg(clip) ? 1 : (clip.speed || 1),
       x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1,
-      animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false
+      animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false, audioMuted: isImg(clip), volume: 1
     }]))
     setStatus(t('msg_added_v2'))
   }
@@ -1035,13 +1035,16 @@ export default function App() {
   function toggleMuteTargets(targets) {
     const audioIds = new Set(targets.filter((x) => x.kind === 'audio').map((x) => x.id))
     const clipIds = new Set(targets.filter((x) => x.kind === 'clip').map((x) => x.id))
+    const overlayIds = new Set(targets.filter((x) => x.kind === 'v2').map((x) => x.id))
+    const overlaysWithAudio = videoOverlays.filter((i) => overlayIds.has(i.id) && i.kind === 'video' && !i.sticker && !trackLocked(i.trackId))
     const audio = audioItems.filter((i) => audioIds.has(i.id) && !trackLocked(i.trackId))
     const withAudio = autoCut && clips.length === 1 ? [] : clips.filter((c) => clipIds.has(c.id) && !isImg(c) && c.src?.hasAudio && !c.audioDetached)
-    if (!audio.length && !withAudio.length) return
-    const mute = [...audio.map((i) => !i.muted), ...withAudio.map((c) => !c.audioMuted)].some(Boolean) // con muc dang bat tieng -> tat het; da tat het -> bat lai
+    if (!audio.length && !withAudio.length && !overlaysWithAudio.length) return
+    const mute = [...audio.map((i) => !i.muted), ...withAudio.map((c) => !c.audioMuted), ...overlaysWithAudio.map((i) => i.audioMuted === false)].some(Boolean) // con muc dang bat tieng -> tat het; da tat het -> bat lai
     pushHistory()
     if (audio.length) setAudioItems((items) => items.map((i) => (audio.some((a) => a.id === i.id) ? { ...i, muted: mute } : i)))
     if (withAudio.length) setClips((items) => items.map((c) => (withAudio.some((a) => a.id === c.id) ? { ...c, audioMuted: mute } : c)))
+    if (overlaysWithAudio.length) setVideoOverlays((items) => items.map((i) => (overlaysWithAudio.some((a) => a.id === i.id) ? { ...i, audioMuted: mute } : i)))
   }
   // Keo nhom: cac item V2+ / audio dang chon cung doi thoi diem (giu duong cua tung item); va cham xu ly khi tha
   function startGroupDrag(item, e, group) {
@@ -1232,6 +1235,7 @@ export default function App() {
     const found = findTarget(target)
     if (!found) return
     if (target.kind === 'audio') { pushHistory(); updateAudioItem(found.id, { muted: !found.muted }); return }
+    if (target.kind === 'v2') { if (found.kind !== 'video' || found.sticker) return; pushHistory(); updateVideoOverlay(found.id, { audioMuted: found.audioMuted === false }); return }
     if (target.kind !== 'clip' || isImg(found) || !found.src?.hasAudio || found.audioDetached) return
     if (!found.audioMuted && autoCut && clips.length === 1) { setStatus(t('msg_mute_blocked_autocut')); return }
     pushHistory(); updateClip(found.id, { audioMuted: !found.audioMuted })
@@ -1268,8 +1272,9 @@ export default function App() {
     const inside = playheadInside(target)
     const loopItem = target.kind === 'audio' && !!found.loop
     const canSaveAudio = target.kind === 'clip' ? hasOwnAudio : target.kind === 'v2' ? found.kind !== 'image' && !found.missing : !found.missing
-    const muted = target.kind === 'audio' ? !!found.muted : !!clip?.audioMuted
-    const muteDisabled = target.kind === 'audio' ? false : !(hasOwnAudio && !clip.audioDetached)
+    const overlayVideo = target.kind === 'v2' && found.kind === 'video' && !found.sticker && !found.missing
+    const muted = target.kind === 'audio' ? !!found.muted : target.kind === 'v2' ? found.audioMuted !== false : !!clip?.audioMuted
+    const muteDisabled = target.kind === 'audio' ? false : target.kind === 'v2' ? !overlayVideo : !(hasOwnAudio && !clip.audioDetached)
     const entry = (id, labelKey, icon, run, extra = {}) => ({ id, label: t(labelKey), icon, run, ...extra })
     return [
       entry('copy', 'ctx_copy', <Copy size={14} />, () => copyTarget(target), { shortcut: 'Ctrl+C' }),
@@ -1435,7 +1440,7 @@ export default function App() {
     const overlay = {
       id: makeEntityId('video-overlay'), path: clip.path, name: clip.name, kind: image ? 'image' : 'video',
       start, in: image ? 0 : clip.in, out: clip.out, speed: image ? 1 : (clip.speed || 1),
-      x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false
+      x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: !!clip.animated, sourceDuration: clip.src?.duration || clip.out, missing: false, audioMuted: true, volume: 1
     }
     const carryAudio = !image && !!clip.src?.hasAudio && !clip.audioDetached && !clip.audioMuted
     const audio = carryAudio ? { ...buildDetachedAudioItem(clip, { start }, makeEntityId('audio')), sourceClipId: undefined } : null
@@ -1947,7 +1952,7 @@ export default function App() {
         const image = item.media.kind === 'image'
         const length = image ? slideDur : item.media.duration
         const overlay = { id: makeEntityId('video-overlay'), path: item.path, name: item.name, kind: image ? 'image' : 'video', start: cursor, in: 0, out: length,
-          speed: 1, x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: item.media.formatName === 'gif', sourceDuration: length, missing: false }
+          speed: 1, x: 0.25, y: 0.25, width: 0.5, height: 0.5, opacity: 1, animated: item.media.formatName === 'gif', sourceDuration: length, missing: false, audioMuted: image, volume: 1 }
         cursor += length
         return overlay
       })
@@ -3045,6 +3050,12 @@ export default function App() {
     } catch (error) { notify(t('st_err', { e: error.message || error }), 'err') }
   }
 
+  // Tieng cua video phu (V2+) dang hien va bat tieng: thanh cac doan tieng cung thoi diem / toc do, mo vao ra theo lop hinh
+  function overlayAudioItems() {
+    return withLayerZIndex(videoOverlays, tracks)
+      .filter((item) => visibleVideoIds.has(item.trackId) && item.kind === 'video' && !item.sticker && !item.missing && item.audioMuted === false)
+      .map((item) => ({ id: `${item.id}:audio`, path: item.path, name: item.name, track: 'original', trackId: item.trackId, start: item.start, in: item.in, out: item.out, speed: item.speed, gain: item.volume ?? 1, fadeIn: item.fadeIn || 0, fadeOut: item.fadeOut || 0, loop: false, muted: false, pan: 0 }))
+  }
   // ---- Xuat ----
   async function handleExport() {
     if (!clips.length) return
@@ -3076,7 +3087,7 @@ export default function App() {
           videoOverlays: withLayerZIndex(videoOverlays, tracks).filter((item) => visibleVideoIds.has(item.trackId)).map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker, rotation, flipH, flipV, fadeIn, fadeOut }) => ({
             path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker, rotation, flipH, flipV, fadeIn, fadeOut
           })),
-          audioItems: audioItems.filter((item) => audibleIds.has(item.trackId)),
+          audioItems: [...audioItems.filter((item) => audibleIds.has(item.trackId)), ...overlayAudioItems()],
           origVolume: effOrigVolume, ducking, aiEdited,
           captionTimebase,
           useGpu, quality, resolution, transition: clips.length > 1 && transition !== 'none'
@@ -3204,7 +3215,7 @@ export default function App() {
                     onLoadedMetadata={(e) => { try { e.currentTarget.currentTime = clamp(other.sourceTime, 0, Math.max(0, e.currentTarget.duration - 0.02)) } catch {} }}
                     onClick={togglePlay} style={style} />
                 })()}
-                {activeVideoOverlays.map((item) => <VideoOverlayPreview key={item.id} item={item} current={current} playing={playing} safeZone={safeZone && ratio !== 'original'}
+                {activeVideoOverlays.map((item) => <VideoOverlayPreview key={item.id} item={item} current={current} playing={playing} volume={volume} muted={muted} safeZone={safeZone && ratio !== 'original'}
                   onEditStart={beginHistoryEdit} onEditEnd={endHistoryEdit} onPositionChange={updateVideoOverlay} />)}
                 {safeZone && ratio !== 'original' && (<div className="safe"><div className="sz top" /><div className="sz bottom" /><div className="sz right" /><span className="sz-tip">{t('safezone_tip')}</span></div>)}
                 {activeCaption && <div className="cc-caption"><span>{activeCaption.text}</span></div>}

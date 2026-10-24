@@ -30,6 +30,14 @@ function rmsAt(file, start, duration = 0.2) {
   for (let i = 0; i + 1 < r.stdout.length; i += 2) { const n = r.stdout.readInt16LE(i) / 32768; sum += n * n; count++ }
   return count ? Math.sqrt(sum / count) : 0
 }
+/** RMS cua mot kenh (0 = trai, 1 = phai) trong khoang [start, start + duration] giay. */
+function channelRmsAt(file, channel, start, duration = 0.5) {
+  const r = spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(start), '-t', String(duration), '-i', file, '-vn', '-af', `pan=mono|c0=c${channel}`, '-ar', '8000', '-f', 's16le', 'pipe:1'])
+  if (r.status !== 0 || !r.stdout?.length) return 0
+  let sum = 0, count = 0
+  for (let i = 0; i + 1 < r.stdout.length; i += 2) { const n = r.stdout.readInt16LE(i) / 32768; sum += n * n; count++ }
+  return count ? Math.sqrt(sum / count) : 0
+}
 /** Mau [r,g,b] cua mot diem anh tai thoi diem t (giay) cua file video. */
 function pixelAt(file, x, y, t = 1) {
   const r = spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=1:1:${x}:${y},format=rgb24`, '-f', 'rawvideo', 'pipe:1'])
@@ -257,4 +265,4 @@ function projectOf(fixtures, extra = {}) {
   }
 }
 
-module.exports = { repo, sleep, ffmpeg, probeDuration, probeStreams, pixelAt, rmsAt, makeFixtures, launchApp, projectOf }
+module.exports = { repo, sleep, ffmpeg, probeDuration, probeStreams, pixelAt, rmsAt, channelRmsAt, makeFixtures, launchApp, projectOf }

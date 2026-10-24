@@ -808,7 +808,7 @@ async function runExport(event, opts) {
   const audioTracks = Array.isArray(opts.audioItems) && opts.audioItems.length
     ? opts.audioItems.filter((item) => item && !item.muted).map((item) => ({
       path: item.path, role: item.track, volume: item.gain ?? 1, loop: !!item.loop,
-      start: item.start ?? 0, in: item.in ?? 0, out: item.out, speed: item.speed ?? 1, fadeIn: item.fadeIn ?? 0, fadeOut: item.fadeOut ?? 0
+      start: item.start ?? 0, in: item.in ?? 0, out: item.out, speed: item.speed ?? 1, fadeIn: item.fadeIn ?? 0, fadeOut: item.fadeOut ?? 0, pan: item.pan ?? 0
     }))
     : [
       ...(opts.music ? [{ path: opts.music.path, volume: opts.music.volume ?? 1, loop: opts.music.loop !== false, role: 'music' }] : []),

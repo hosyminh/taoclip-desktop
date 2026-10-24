@@ -243,6 +243,8 @@ function normalizeTimeline(migrated, makeId) {
       width: finite(item.width ?? 1, `videoOverlays[${index}].width`, { min: 0.001, max: 4 }),
       height: finite(item.height ?? 1, `videoOverlays[${index}].height`, { min: 0.001, max: 4 }),
       opacity: finite(item.opacity ?? 1, `videoOverlays[${index}].opacity`, { min: 0, max: 1 }),
+      audioMuted: kind === 'video' && !item.sticker ? (item.audioMuted === undefined ? true : !!item.audioMuted) : true,
+      volume: finite(item.volume ?? 1, `videoOverlays[${index}].volume`, { min: 0, max: 2 }),
       rotation: finite(item.rotation ?? 0, `videoOverlays[${index}].rotation`, { min: -360, max: 360 }), flipH: !!item.flipH, flipV: !!item.flipV,
       fadeIn: finite(item.fadeIn ?? 0, `videoOverlays[${index}].fadeIn`, { min: 0, max: 60 }), fadeOut: finite(item.fadeOut ?? 0, `videoOverlays[${index}].fadeOut`, { min: 0, max: 60 }),
       zIndex: finite(item.zIndex ?? index, `videoOverlays[${index}].zIndex`), missing: !!item.missing

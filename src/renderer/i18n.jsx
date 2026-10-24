@@ -449,6 +449,8 @@ const STR = {
     ip_pan_right: 'Phải',
     ip_pan_center: 'Giữa',
     ip_pan_hint: 'Chỉ có tác dụng khi xuất; xem trước chưa nghe được.',
+    ip_use_sound: 'Dùng tiếng của video này khi xuất',
+    ip_use_sound_hint: 'Xem trước nghe tối đa 100%; bản xuất khuếch đại đúng giá trị. Mờ vào / mờ ra áp dụng cho cả tiếng.',
     tip_first: 'Mẹo: nhấn ? để xem toàn bộ phím tắt. Kéo mép các panel để đổi kích thước.'
   },
   en: {
@@ -892,6 +894,8 @@ const STR = {
     ip_pan_right: 'Right',
     ip_pan_center: 'Centre',
     ip_pan_hint: 'Applies on export only; the preview does not play it.',
+    ip_use_sound: 'Use this video\'s sound in the export',
+    ip_use_sound_hint: 'Preview plays at most 100%; the export applies the exact value. Fade in / out also applies to the sound.',
     tip_first: 'Tip: press ? to see all keyboard shortcuts. Drag panel edges to resize.'
   }
 }

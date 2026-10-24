@@ -198,6 +198,7 @@ export default function Timeline({
                 onClick={(event) => { event.stopPropagation(); onSelectItem({ kind: 'v2', id: item.id }, event); if (!withModifier(event)) onSeek(item.start) }}
                 onContextMenu={(e) => onItemContextMenu?.(e, { kind: 'v2', id: item.id })}>
                 {renderItemThumbs(item, Math.max(24, itemDuration * pps))}
+                {item.kind === 'video' && !item.sticker && item.audioMuted === false && <Volume2 size={11} className="ov-audio" />}
                 <span>{item.name || item.path.split(/[\\/]/).pop()}</span>
                 <div className="cc-trim l" onMouseDown={(event) => onStartItemTrim('v2', item, 'l', event)} title={t('item_trim_tip')} />
                 <div className="cc-trim r" onMouseDown={(event) => onStartItemTrim('v2', item, 'r', event)} title={t('item_trim_tip')} />

@@ -2,7 +2,7 @@
 const fs = require('fs')
 const path = require('path')
 
-module.exports = function register({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, sleep }) {
+module.exports = function register({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, channelRmsAt, probeStreams, sleep }) {
   const winPath = (p) => p.replace(/\//g, '\\')
   const tabs = (app) => app.eval(`[...document.querySelectorAll('.cc-tltab')].map((el) => ({ id: el.dataset.tl, name: (el.querySelector('.nm') || el.querySelector('.nm-edit'))?.textContent || el.querySelector('.nm-edit')?.value, on: el.getAttribute('aria-selected') === 'true', closable: !!el.querySelector('.x') }))`)
   const names = async (app) => (await tabs(app)).map((tab) => tab.name)
@@ -843,6 +843,61 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
       check('xuat that: tieng clip chi con ~50% so voi nguon', source > 0.02 && Math.abs(exported / source - 0.5) < 0.12, `(${(exported / source).toFixed(2)})`)
       check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
     } finally { app.close() }
+  })
+
+  // Xuat that bang giao dien (720p, nho gon)
+  const exportFromUi = async (app) => {
+    await app.click('.cc-top .cc-export')
+    await app.waitFor(`!!document.querySelector('.cc-modal-box .exp-start')`, { label: 'hop thoai xuat' })
+    await app.eval(`[...document.querySelectorAll('.cc-modal-box .seg button')].find(b => b.textContent.trim() === '720p').click()`)
+    await app.eval(`[...document.querySelectorAll('.cc-modal-box .seg button')].find(b => b.textContent.trim() === 'Nhỏ gọn').click()`)
+    await app.click('.cc-modal-box .exp-start')
+    await app.waitFor(`!document.querySelector('.cc-modal-box')`, { timeout: 120000, label: 'xuat xong', interval: 500 })
+  }
+
+  scenario('tieng cua video phu (V2+): file cu tat tieng, bat bang hop kiem thi xuat co tieng; can bang trai / phai khi xuat that', async () => {
+    const out = path.join(fx.dir, 'e2e-overlay-audio.mp4')
+    try { fs.rmSync(out, { force: true }) } catch {}
+    const project = { version: 4, projectId: 'e2e-ovaudio-' + Math.random().toString(36).slice(2),
+      clips: [{ id: 'c1', path: fx.videoSilent, name: 'video-silent.mp4', kind: 'video', in: 0, out: 3, speed: 1 }],
+      videoOverlays: [{ id: 'ov', path: fx.videoA, name: 'video-a.mp4', kind: 'video', start: 0, in: 0, out: 3, speed: 1, sourceDuration: 5, x: 0.5, y: 0.5, width: 0.4, height: 0.4, opacity: 1 }] }
+    const app = await launchApp({ project, dialogs: { saveVideo: out.replace(/\\/g, '/') } })
+    try {
+      await app.restoreProject()
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      await app.click('.cc-v2-clip')
+      await app.waitFor(`!!document.querySelector('.cc-insp [data-prop="useSound"]')`, { label: 'hop kiem tieng' })
+      check('du an cu: video phu mac dinh tat tieng (hop kiem trong, khong co bieu tuong loa)', !(await app.eval(`document.querySelector('.cc-insp [data-prop="useSound"]').checked`)) && (await app.count('.cc-v2-clip .ov-audio')) === 0)
+      await exportFromUi(app)
+      check('xuat khi tat tieng video phu: khong co luong audio (giu hanh vi cu)', !probeStreams(out).includes('audio'), probeStreams(out).join(','))
+      await app.click('.cc-insp [data-prop="useSound"]')
+      await app.waitFor(`!!document.querySelector('.cc-v2-clip .ov-audio') && !!document.querySelector('.cc-insp [data-prop="overlayVolume"]')`, { label: 'bat tieng' })
+      check('bat tieng: bieu tuong loa tren item va thanh am luong hien ra', true)
+      try { fs.rmSync(out, { force: true }) } catch {}
+      await exportFromUi(app)
+      const level = rmsAt(out, 0.5, 0.6)
+      check('xuat khi bat tieng video phu: co audio va co muc tieng (>0.02)', probeStreams(out).includes('audio') && level > 0.02, `(rms ${level.toFixed(3)})`)
+      // M tat lai
+      await app.key('m')
+      await app.waitFor(`document.querySelectorAll('.cc-v2-clip .ov-audio').length === 0`, { label: 'M tat tieng' })
+      check('phim M tat / bat tieng cua video phu', true)
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
+
+    // can bang: tieng item (mono) dat hoan toan ben trai
+    const panOut = path.join(fx.dir, 'e2e-pan.mp4')
+    try { fs.rmSync(panOut, { force: true }) } catch {}
+    const panProject = { version: 4, projectId: 'e2e-pan-' + Math.random().toString(36).slice(2),
+      clips: [{ id: 'c1', path: fx.videoSilent, name: 'video-silent.mp4', kind: 'video', in: 0, out: 3, speed: 1 }],
+      audioItems: [{ id: 'aud', path: fx.toneA, name: 'aud', track: 'music', start: 0, in: 0, out: 3, gain: 1, sourceDuration: 3, pan: -1 }] }
+    const pan = await launchApp({ project: panProject, dialogs: { saveVideo: panOut.replace(/\\/g, '/') } })
+    try {
+      await pan.restoreProject()
+      await exportFromUi(pan)
+      const left = channelRmsAt(panOut, 0, 0.5, 1), right = channelRmsAt(panOut, 1, 0.5, 1)
+      check('xuat that voi can bang -1: chi kenh trai co tieng', left > 0.03 && right < 0.003, `(L ${left.toFixed(3)} R ${right.toFixed(3)})`)
+      check('khong co loi runtime', pan.errors.length === 0, pan.errors.slice(0, 2).join(' | '))
+    } finally { pan.close() }
   })
 
   // Keo giua V1 va cac duong phu, va khoi tieng goc A1 sang duong tieng khac

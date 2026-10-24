@@ -6,7 +6,7 @@
 const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
-const { repo, sleep, probeDuration, probeStreams, pixelAt, rmsAt, makeFixtures, launchApp, projectOf } = require('./lib.cjs')
+const { repo, sleep, probeDuration, probeStreams, pixelAt, rmsAt, channelRmsAt, makeFixtures, launchApp, projectOf } = require('./lib.cjs')
 
 const argv = process.argv.slice(2)
 const filter = argv.find((arg) => !arg.startsWith('--'))
@@ -440,7 +440,7 @@ scenario('tha file tu he dieu hanh vao cua so them clip', async () => {
   } finally { app.close() }
 })
 
-require('./scenarios-timelines.cjs')({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, sleep })
+require('./scenarios-timelines.cjs')({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, channelRmsAt, probeStreams, sleep })
 
 ;(async () => {
   for (const { name, fn } of scenarios) {

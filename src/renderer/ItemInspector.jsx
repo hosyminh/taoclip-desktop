@@ -128,6 +128,17 @@ export function ItemProps({ kind, item, trackName, update, onRemove, onDuplicate
             onChange={(value) => update({ speed: clampNumber(value, 0.05, 16) })} />
         </>}
       <div className="kv"><span>{t('ip_len_on_tl')}</span><b>{fmt(length)}</b></div>
+      {!still && <>
+        <div className="ip-sec">{t('ip_section_sound')}</div>
+        <label className="chk"><input type="checkbox" data-prop="useSound" checked={item.audioMuted === false}
+          onChange={(event) => { pushHistory(); update({ audioMuted: !event.target.checked }) }} /> {t('ip_use_sound')}</label>
+        {item.audioMuted === false && <>
+          <label>{t('ip_gain')} <b>{Math.round((item.volume ?? 1) * 100)}%</b></label>
+          <input type="range" min="0" max="2" step="0.05" value={item.volume ?? 1} data-prop="overlayVolume"
+            onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(event) => update({ volume: Number(event.target.value) })} />
+          <small className="cap-hint">{t('ip_use_sound_hint')}</small>
+        </>}
+      </>}
     </div>
   )
 }
