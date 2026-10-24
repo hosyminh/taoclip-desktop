@@ -162,6 +162,8 @@ export default function App() {
   const audibleIds = useMemo(() => audibleTrackIds(tracks), [tracks])
   // A1 la track tieng goc cua clip V1: tat tieng / solo track khac se tat luon tieng goc
   const effOrigVolume = audibleIds.has(MAIN_AUDIO_TRACK) ? origVolume : 0
+  // Am luong rieng cua clip khi xem truoc (the video khong khuech dai qua 100%, ban xuat thi khuech dai dung gia tri)
+  const clipGain = (clip) => Math.min(1, Math.max(0, Number(clip?.volume ?? 1)))
   const [ttsText, setTtsText] = useState('')
   const ttsTextRef = useRef(ttsText)
   ttsTextRef.current = ttsText
@@ -431,8 +433,8 @@ export default function App() {
   }, [selId, clips])
   useEffect(() => {
     const video = videoRef.current
-    if (video) { video.volume = volume * effOrigVolume * mainPreviewOpacity; video.muted = muted || clipSilent }
-  }, [volume, muted, clipSilent, effOrigVolume, activeIdx, mainPreviewOpacity])
+    if (video) { video.volume = volume * effOrigVolume * clipGain(activeClip) * mainPreviewOpacity; video.muted = muted || clipSilent }
+  }, [volume, muted, clipSilent, effOrigVolume, activeIdx, mainPreviewOpacity, activeClip?.volume])
   useEffect(() => {
     const video = overlapVideoRef.current
     if (!video || !overlapPreview) return
@@ -440,7 +442,7 @@ export default function App() {
     const otherClip = activeClip?.id === overlapPreview.incoming.clipId ? overlapPreview.outgoingClip : overlapPreview.incomingClip
     if (!otherClip || otherClip.missing || isImg(otherClip)) { video.pause(); return }
     video.playbackRate = otherClip.speed || 1
-    video.volume = volume * effOrigVolume * (1 - mainPreviewWeight)
+    video.volume = volume * effOrigVolume * clipGain(otherClip) * (1 - mainPreviewWeight)
     video.muted = muted || !otherClip.src?.hasAudio || !!otherClip.audioDetached || !!otherClip.audioMuted
     if (Number.isFinite(video.duration) && video.duration > 0 && Math.abs(video.currentTime - other.sourceTime) > 0.12) {
       try { video.currentTime = clamp(other.sourceTime, 0, Math.max(0, video.duration - 0.02)) } catch {}
@@ -563,7 +565,8 @@ export default function App() {
       if (clip.kind !== 'image' && !clip.missing && !clip.thumbs?.length) loadThumbnails(clip.id, clip.path)
       if (clip.kind !== 'image' && !clip.missing && clip.src?.hasAudio && !clip.wave) loadWave(clip.id, clip.path, true)
     })
-    setOverlays(s.overlays || []); setVideoOverlays(s.videoOverlays || []); setAudioItems(s.audioItems || []); setTracks(normalizeTracks(s.tracks)); setSelItem(null); setCaptions(s.captions || []); setCaptionTimebase(s.captionTimebase || 'timeline')
+    setOverlays(s.overlays || []); setVideoOverlays(s.videoOverlays || []); setAudioItems(s.audioItems || []); setTracks(normalizeTracks(s.tracks)); setSelItem((prev) => (prev && ((prev.kind === 'v2' ? s.videoOverlays : s.audioItems) || []).some((item) => item.id === prev.id) ? prev : null)) // giu muc dang chon neu con ton tai (Hoan tac khong mat bang thuoc tinh)
+     setCaptions(s.captions || []); setCaptionTimebase(s.captionTimebase || 'timeline')
     setRatio(s.ratio || '9:16'); setFilterKey(s.filterKey || 'none'); setFilterIntensity(s.filterIntensity ?? 100); setMode(s.mode || 'smart')
     setTransition(s.transition || 'none'); setTransitionStyle(s.transitionStyle || DEFAULT_TRANSITION_STYLE); setTransitionDuration(s.transitionDuration ?? 0.5); setBurnCaptions(s.burnCaptions !== false)
     setOrigVolume(s.origVolume ?? 1)
@@ -1085,6 +1088,16 @@ export default function App() {
     }
     attachDocumentMouseDrag(move, up)
   }
+  // Muc dang chon cho bang thuoc tinh ben phai (uu tien: nhieu muc > item V2+ / tieng > chu > clip V1)
+  function inspectorSelection() {
+    if (multi.length > 1) return { multiCount: multi.length }
+    if (selItem) {
+      const item = (selItem.kind === 'v2' ? videoOverlays : audioItems).find((candidate) => candidate.id === selItem.id)
+      if (item) return { selectedItem: { kind: selItem.kind, item, trackName: tracks.find((track) => track.id === item.trackId)?.name || item.trackId } }
+    }
+    if (selOv) { const overlay = overlays.find((candidate) => candidate.id === selOv); if (overlay) return { selectedText: overlay } }
+    return {}
+  }
   function openItemMenu(event, target) {
     event.preventDefault(); event.stopPropagation()
     selectTarget(target)
@@ -1599,7 +1612,7 @@ export default function App() {
   function onLoadedMeta() {
     const v = videoRef.current; if (!v || !activeClip) return
     setPreviewLoading(false); setPreviewError('')
-    v.playbackRate = activeClip.speed || 1; v.volume = volume * effOrigVolume * mainPreviewOpacity; v.muted = muted || clipSilent
+    v.playbackRate = activeClip.speed || 1; v.volume = volume * effOrigVolume * clipGain(activeClip) * mainPreviewOpacity; v.muted = muted || clipSilent
     // Tu sua thoi luong neu probe thieu (out=0 hoac vuot qua video that)
     if (v.duration && isFinite(v.duration) && (!activeClip.out || activeClip.out < 0.05 || activeClip.out > v.duration + 0.5)) {
       updateClip(activeClip.id, { out: v.duration, src: { ...activeClip.src, duration: v.duration } })
@@ -2679,7 +2692,7 @@ export default function App() {
       captionTimebase: src.captionTimebase, ratio: src.ratio, filterKey: src.filterKey, filterIntensity: src.filterIntensity, mode: src.mode,
       captions: src.captions, burnCaptions: src.burnCaptions, overlays: src.overlays, videoOverlays: src.videoOverlays,
       audioItems: src.audioItems, tracks: src.tracks, transition: src.transition, transitionStyle: src.transitionStyle, transitionDuration: src.transitionDuration,
-      clips: src.clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
+      clips: src.clips.map((c) => ({ id: c.id, path: c.path, name: c.name, kind: c.kind || 'video', audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, volume: c.volume, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, missing: c.missing })),
       ducking: src.ducking, origVolume: src.origVolume, syncMode: src.syncMode, slideDur: src.slideDur,
       ttsEngine: src.ttsEngine, ttsVoice: src.ttsVoice, ttsRate: src.ttsRate, ttsPitch: src.ttsPitch,
       aiEdited: src.aiEdited, keepSegments: src.keepSegments, autoCut: src.autoCut, autoInfo: src.autoInfo, silenceParams: src.silenceParams, markers: src.markers
@@ -2731,7 +2744,7 @@ export default function App() {
         if (c.kind === 'image') {
           built.push({ id: c.id, kind: 'image', path: c.path, name: c.name, animated: c.animated, missing: !m, src: { duration: c.out, width: m?.width || 0, height: m?.height || 0, hasAudio: false, isImage: true, rotation: m?.rotation || 0 }, in: 0, out: c.out, speed: 1, kenBurns: c.kenBurns !== false, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: m ? [c.path] : [] })
         } else {
-          built.push({ id: c.id, path: c.path, name: c.name, missing: !m, src: m || { duration: c.out, width: 0, height: 0, hasAudio: false }, in: c.in, out: c.out, speed: c.speed, audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: [] })
+          built.push({ id: c.id, path: c.path, name: c.name, missing: !m, src: m || { duration: c.out, width: 0, height: 0, hasAudio: false }, in: c.in, out: c.out, speed: c.speed, audioDetached: c.audioDetached, audioMuted: c.audioMuted, enhance: c.enhance, volume: c.volume, cropMode: c.cropMode, cropX: c.cropX, cropY: c.cropY, thumbs: [] })
         }
       }
       const loadedVideoOverlays = await Promise.all(timeline.videoOverlays.map(async (item) => (item.sticker ? { ...item, missing: false } : { ...item, missing: !(await probeOnce(item.path)) })))
@@ -3046,7 +3059,7 @@ export default function App() {
       const c = clips[0]
       segments = keepSegments.map((s) => ({ start: Math.max(s.start, c.in), end: Math.min(s.end, c.out) })).filter((s) => s.end - s.start > 0.05)
     }
-    const clipPayload = clips.map((c) => ({ input: c.path, kind: c.kind || 'video', audioDetached: !!c.audioDetached, audioMuted: !!c.audioMuted, enhance: !!c.enhance, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode || 'fit', cropX: c.cropX ?? 0.5, cropY: c.cropY ?? 0.5, formatName: c.src?.formatName, hasAudio: !!c.src?.hasAudio && !c.audioDetached && !c.audioMuted }))
+    const clipPayload = clips.map((c) => ({ input: c.path, kind: c.kind || 'video', audioDetached: !!c.audioDetached, audioMuted: !!c.audioMuted, enhance: !!c.enhance, volume: c.volume ?? 1, in: c.in, out: c.out, speed: c.speed, kenBurns: c.kenBurns, animated: c.animated, cropMode: c.cropMode || 'fit', cropX: c.cropX ?? 0.5, cropY: c.cropY ?? 0.5, formatName: c.src?.formatName, hasAudio: !!c.src?.hasAudio && !c.audioDetached && !c.audioMuted }))
     try {
       for (let i = 0; i < ratios.length; i++) {
         const r = ratios[i]
@@ -3060,8 +3073,8 @@ export default function App() {
           jobId, clips: clipPayload, editPlan: toExportSegments(timelinePlan), output: o, ratio: r, mode, filterKey, filterIntensity, segments,
           captions, burnCaptions: burnCaptions && captions.length > 0,
           overlays: overlays.map((o) => ({ type: o.type, text: o.text, start: o.start, end: o.end, x: o.x, y: o.y, size: o.size, color: o.type === 'text' ? o.color : null, align: o.align || 'center', zIndex: o.zIndex || 0 })),
-          videoOverlays: withLayerZIndex(videoOverlays, tracks).filter((item) => visibleVideoIds.has(item.trackId)).map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker }) => ({
-            path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker
+          videoOverlays: withLayerZIndex(videoOverlays, tracks).filter((item) => visibleVideoIds.has(item.trackId)).map(({ path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker, rotation, flipH, flipV, fadeIn, fadeOut }) => ({
+            path, kind, start, in: sourceIn, out: sourceOut, speed, x, y, width, height, opacity, zIndex, animated, missing, name, sticker, rotation, flipH, flipV, fadeIn, fadeOut
           })),
           audioItems: audioItems.filter((item) => audibleIds.has(item.trackId)),
           origVolume: effOrigVolume, ducking, aiEdited,
@@ -3243,6 +3256,12 @@ export default function App() {
         <Inspector width={inspW} hasClips={hasClips} single={single}
           ratio={ratio} setRatio={changeRatio} safeZone={safeZone} setSafeZone={setSafeZone}
           selectedClip={selectedClip} moveClip={moveClip} deleteClip={deleteClip} updateClip={updateClip}
+          {...inspectorSelection()}
+          onUpdateItem={(patch) => (selItem?.kind === 'v2' ? updateVideoOverlay(selItem.id, patch) : selItem && updateAudioItem(selItem.id, patch))}
+          onRemoveItem={() => selItem && deleteTarget({ kind: selItem.kind, id: selItem.id })}
+          onDuplicateItem={() => selItem && duplicateTarget({ kind: selItem.kind, id: selItem.id })}
+          onMultiDuplicate={() => duplicateTargets(multi)} onMultiMute={() => toggleMuteTargets(multi)} onMultiDelete={() => deleteTargets(multi)}
+          onOpenText={() => setTab('text')}
           pushHistory={pushHistory} beginEdit={beginHistoryEdit} endEdit={endHistoryEdit} setAllSlideDur={setAllSlideDur}
           onDetectSilence={detectSilence} busy={busy} canDetectSilence={!!clips[0]?.src?.hasAudio}
           autoInfo={autoInfo} autoCut={autoCut} setAutoCut={changeAutoCut} status={status}

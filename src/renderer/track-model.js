@@ -142,6 +142,18 @@ export function assignDefaultTracks({ tracks, videoItems = [], audioItems = [], 
   }
 }
 
+// ---------- Mo vao / mo ra cua lop hinh ----------
+
+/** He so trong suot (0..1) cua item tai thoi diem `time` theo fadeIn / fadeOut (giay); ngoai khoang item thi khong dung. */
+export function fadeFactor(item, time) {
+  const { start, end } = itemSpan(item)
+  const fadeIn = Math.max(0, Number(item.fadeIn) || 0), fadeOut = Math.max(0, Number(item.fadeOut) || 0)
+  let factor = 1
+  if (fadeIn > 0) factor = Math.min(factor, (time - start) / fadeIn)
+  if (fadeOut > 0) factor = Math.min(factor, (end - time) / fadeOut)
+  return Math.max(0, Math.min(1, factor))
+}
+
 // ---------- Do tai: so lop hinh chong nhau ----------
 
 export const MANY_LAYERS = 6 // tren muc nay (tinh ca V1) xuat va xem truoc se cham ro ret

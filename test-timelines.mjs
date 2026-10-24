@@ -174,6 +174,37 @@ test('moc: chuan hoa (sap theo thoi gian, bo muc hong, ten gon), mac dinh rong, 
   assert.ok(TIMELINE_KEYS.includes('markers'))
 })
 
+test('lop hinh: xoay / lat / mo vao ra co mac dinh, gioi han hop le, giu qua vong luu doc', () => {
+  const overlay = { id: 'o', path: 'a.png', kind: 'image', start: 0, out: 3 }
+  const base = normalizeProject({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [overlay] }] }, makeId).timelines[0].videoOverlays[0]
+  assert.deepEqual([base.rotation, base.flipH, base.flipV, base.fadeIn, base.fadeOut], [0, false, false, 0, 0])
+  const set = normalizeProject({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [{ ...overlay, rotation: -90, flipH: 1, fadeIn: 0.5, fadeOut: 1.5 }] }] }, makeId)
+  const item = set.timelines[0].videoOverlays[0]
+  assert.deepEqual([item.rotation, item.flipH, item.flipV, item.fadeIn, item.fadeOut], [-90, true, false, 0.5, 1.5])
+  assert.deepEqual(normalizeProject(JSON.parse(JSON.stringify(set)), makeId), set)
+  for (const bad of [{ rotation: 361 }, { rotation: 'x' }, { fadeIn: -1 }, { fadeOut: 61 }]) {
+    assert.throws(() => normalizeProject({ version: 6, assets: [], timelines: [{ id: 't', videoOverlays: [{ ...overlay, ...bad }] }] }, makeId), /videoOverlays\[0\]/, JSON.stringify(bad))
+  }
+})
+
+test('am luong clip V1 va can bang item tieng: mac dinh, gioi han, giu qua vong luu doc', () => {
+  const make = (clipExtra, audioExtra) => normalizeProject({ version: 6, assets: [], timelines: [{ id: 't',
+    clips: [{ id: 'c', path: 'a.mp4', in: 0, out: 3, ...clipExtra }, { id: 'i', path: 'p.png', kind: 'image', in: 0, out: 2, volume: 0.3 }],
+    audioItems: [{ id: 'a', path: 'm.mp3', track: 'music', out: 2, ...audioExtra }] }] }, makeId).timelines[0]
+  const base = make({}, {})
+  assert.equal(base.clips[0].volume, 1)
+  assert.equal(base.clips[1].volume, 1, 'anh khong co tieng: am luong luon 1')
+  assert.equal(base.audioItems[0].pan, 0)
+  const set = make({ volume: 0.5 }, { pan: -0.4 })
+  assert.equal(set.clips[0].volume, 0.5)
+  assert.equal(set.audioItems[0].pan, -0.4)
+  assert.equal(make({ volume: 2 }, { pan: 1 }).clips[0].volume, 2)
+  for (const clipExtra of [{ volume: 2.1 }, { volume: -0.1 }, { volume: 'x' }]) assert.throws(() => make(clipExtra, {}), /clips\[0\]\.volume/)
+  for (const audioExtra of [{ pan: 1.1 }, { pan: -2 }, { pan: 'x' }]) assert.throws(() => make({}, audioExtra), /audioItems\[0\]\.pan/)
+  const round = normalizeProject(JSON.parse(JSON.stringify({ version: 6, assets: [], timelines: [set] })), makeId)
+  assert.equal(round.timelines[0].clips[0].volume, 0.5)
+})
+
 test('referencedPaths + libraryAfterRestore: undo trong tab nay khong lam mat media tab khac dang dung', () => {
   const other = { clips: [{ path: 'C:\\m\\Shared.mp4' }], videoOverlays: [{ path: 'o.png' }], audioItems: [{ path: 'a.wav' }] }
   assert.deepEqual([...referencedPaths(other)].sort(), ['c:/m/shared.mp4', 'a.wav', 'o.png'].sort())

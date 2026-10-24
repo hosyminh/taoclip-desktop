@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { fileUrl } from './utils.js'
 import { stickerUrl } from './sticker-catalog.js'
 import { attachDocumentMouseDrag } from './drag-utils.js'
+import { fadeFactor } from './track-model.js'
 
 export default function VideoOverlayPreview({ item, current, playing, onEditStart, onEditEnd, onPositionChange, safeZone = false }) {
   const videoRef = useRef(null)
@@ -23,7 +24,8 @@ export default function VideoOverlayPreview({ item, current, playing, onEditStar
   if (!active || item.missing || failed) return null
   const style = {
     left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`,
-    opacity: item.opacity, zIndex: 10 + item.zIndex, objectFit: 'contain'
+    opacity: item.opacity * fadeFactor(item, current), zIndex: 10 + item.zIndex, objectFit: 'contain',
+    transform: `translate(-50%, -50%) rotate(${item.rotation || 0}deg) scale(${item.flipH ? -1 : 1}, ${item.flipV ? -1 : 1})`
   }
   const outsideSafe = safeZone && (item.x - item.width / 2 < 0.03 || item.x + item.width / 2 > 0.86 || item.y - item.height / 2 < 0.12 || item.y + item.height / 2 > 0.82)
   const beginPositionDrag = (event) => {

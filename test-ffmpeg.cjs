@@ -54,6 +54,8 @@ async function run() {
   gen('blue-v2.mp4', ['-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=30:d=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p'])
   gen('video10.mp4', ['-f', 'lavfi', '-i', 'testsrc=duration=10:size=64x64:rate=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p'])
   gen('still # photo.png', ['-f', 'lavfi', '-i', 'color=c=red:s=64x48:d=1', '-frames:v', '1'])
+  gen('lr.png', ['-f', 'lavfi', '-i', 'color=c=red:s=100x100:d=1', '-vf', 'drawbox=x=50:y=0:w=50:h=100:color=blue:t=fill', '-frames:v', '1'])
+  gen('gray-base.mp4', ['-f', 'lavfi', '-i', 'color=c=gray:s=640x480:r=30:d=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p'])
   gen('green-v2.png', ['-f', 'lavfi', '-i', 'color=c=green:s=64x48:d=1', '-frames:v', '1'])
   gen('animated.gif', ['-f', 'lavfi', '-i', 'testsrc=duration=1:size=64x64:rate=5', '-loop', '0'])
   fs.writeFileSync(p('broken.mp4'), 'not a media stream')
@@ -231,6 +233,23 @@ async function run() {
   check('2 track vao video khong tieng', near((await ops.probe(p('mixmt2.mp4'))).duration, 6))
   await ops.mixAudioTracks({ video: NA, tracks: [trk[1]], output: p('mixmt3.mp4'), hasOrigAudio: false, ducking: true })
   check('1 track (giong) - nhanh apad', near((await ops.probe(p('mixmt3.mp4'))).duration, 6))
+  // Can bang trai / phai cua item tieng: pan -1 chi con kenh trai, +1 chi con kenh phai, 0 giu hai kenh
+  const channelRms = (file, channel) => {
+    const sample = spawnSync(ffmpegPath, ['-v', 'error', '-ss', '0.5', '-t', '1', '-i', p(file), '-vn', '-af', `pan=mono|c0=c${channel}`, '-ar', '8000', '-f', 's16le', 'pipe:1'])
+    if (sample.status !== 0 || !sample.stdout?.length) return 0
+    let sum = 0, count = 0
+    for (let i = 0; i + 1 < sample.stdout.length; i += 2) { const n = sample.stdout.readInt16LE(i) / 32768; sum += n * n; count++ }
+    return count ? Math.sqrt(sum / count) : 0
+  }
+  for (const [pan, label] of [[-1, 'left'], [1, 'right'], [0, 'centre'], [0.5, 'half right']]) {
+    await ops.mixAudioTracks({ video: NA, tracks: [{ path: p('music.mp3'), volume: 1, role: 'music', pan }], output: p(`pan-${label.replace(' ', '-')}.mp4`), hasOrigAudio: false, ducking: false })
+  }
+  const panRms = (label) => [channelRms(`pan-${label}.mp4`, 0), channelRms(`pan-${label}.mp4`, 1)]
+  const [leftL, leftR] = panRms('left'), [rightL, rightR] = panRms('right'), [midL, midR] = panRms('centre'), [halfL, halfR] = panRms('half-right')
+  check('audio pan -1: only the left channel plays', leftL > 0.05 && leftR < 0.002, `(L ${leftL.toFixed(3)} R ${leftR.toFixed(3)})`)
+  check('audio pan +1: only the right channel plays', rightR > 0.05 && rightL < 0.002, `(L ${rightL.toFixed(3)} R ${rightR.toFixed(3)})`)
+  check('audio pan 0: both channels equal', midL > 0.05 && Math.abs(midL - midR) < 0.005)
+  check('audio pan 0.5: right keeps full level, left is halved', Math.abs(halfL / halfR - 0.5) < 0.06, `(${(halfL / halfR).toFixed(2)})`)
   await ops.mixAudioTracks({ video: SRC, tracks: [{ ...trk[1], delay: 2000 }], output: p('mixmt4.mp4'), hasOrigAudio: true, ducking: false })
   check('giong co delay 2s (adelay)', near((await ops.probe(p('mixmt4.mp4'))).duration, 9))
   await ops.mixAudioTracks({ video: NA, output: p('audio-items.mp4'), hasOrigAudio: false, totalDuration: 6, ducking: false, tracks: [
@@ -275,6 +294,18 @@ async function run() {
   check('detached clip is silent while the next clip keeps its audio', detachedFirst < 0.001 && detachedSecond > 0.01, `(clip1=${detachedFirst.toFixed(4)}, clip2=${detachedSecond.toFixed(4)})`)
   await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, audioMuted: true }], output: p('clip-muted.mp4'), ratio: '16:9' })
   check('muted-only export has no audio stream', !(await ops.probe(p('clip-muted.mp4'))).hasAudio)
+
+  // Am luong rieng cua clip V1: nua am luong, gap doi am luong (SRC la tin hieu sin bien do thap nen khong bi cat dinh)
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, volume: 1 }], output: p('clip-vol1.mp4'), ratio: '16:9' })
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, volume: 0.5 }], output: p('clip-vol05.mp4'), ratio: '16:9' })
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, volume: 2 }], output: p('clip-vol2.mp4'), ratio: '16:9' })
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, volume: 0 }], output: p('clip-vol0.mp4'), ratio: '16:9' })
+  const vol1 = rmsAt('clip-vol1.mp4', 0.5, 0.6), vol05 = rmsAt('clip-vol05.mp4', 0.5, 0.6), vol2 = rmsAt('clip-vol2.mp4', 0.5, 0.6)
+  check('clip volume 0.5 halves the audio level', vol1 > 0.02 && Math.abs(vol05 / vol1 - 0.5) < 0.08, `(${(vol05 / vol1).toFixed(2)})`)
+  check('clip volume 2 doubles the audio level', Math.abs(vol2 / vol1 - 2) < 0.2, `(${(vol2 / vol1).toFixed(2)})`)
+  check('clip volume 0 keeps the stream but is silent', (await ops.probe(p('clip-vol0.mp4'))).hasAudio && rmsAt('clip-vol0.mp4', 0.5, 0.6) < 0.001)
+  await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1, volume: 0.5 }, { input: SRC, kind: 'video', in: 0, out: 2, speed: 1 }], output: p('clip-vol-mix.mp4'), ratio: '16:9' })
+  check('volume is per clip: first clip quieter than the second in one export', rmsAt('clip-vol-mix.mp4', 0.5, 0.6) < rmsAt('clip-vol-mix.mp4', 2.5, 0.6) * 0.65)
 
   // Tang cuong (enhance): bo loc hop le, xuat duoc, khac ban goc
   await ops.exportClips({ clips: [{ input: SRC, kind: 'video', in: 0, out: 2, speed: 1 }], output: p('clip-plain.mp4'), ratio: '16:9' })
@@ -385,6 +416,35 @@ async function run() {
   const gifRegion = (time) => spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(time), '-i', p('v2-animated-gif.mp4'), '-frames:v', '1', '-vf', 'crop=200:200:220:140,format=rgb24', '-f', 'rawvideo', 'pipe:1'])
   const gifFrameA = gifRegion(2.2).stdout || Buffer.alloc(0), gifFrameB = gifRegion(2.8).stdout || Buffer.alloc(0)
   check('V2 animated GIF exports as changing frames in its active range', near(gifInfo.duration, 9, 0.3) && gifFrameA.length > 0 && gifFrameB.length > 0 && !gifFrameA.equals(gifFrameB))
+
+  // Xoay / lat / mo vao ra cua lop hinh: anh 100x100 nua trai do nua phai xanh, dat giua khung xam 640x480 (kich thuoc 160x160)
+  const lrItem = (extra) => ({ path: p('lr.png'), kind: 'image', start: 1, in: 0, out: 3, x: 0.5, y: 0.5, width: 0.25, height: 160 / 480, opacity: 1, zIndex: 0, ...extra })
+  const lrPixel = (file, time, x, y) => {
+    const r = spawnSync(ffmpegPath, ['-v', 'error', '-ss', String(time), '-i', p(file), '-frames:v', '1', '-vf', `crop=1:1:${x}:${y},format=rgb24`, '-f', 'rawvideo', 'pipe:1'])
+    return r.status === 0 && r.stdout?.length >= 3 ? [...r.stdout.subarray(0, 3)] : [0, 0, 0]
+  }
+  const isRed = ([r, g, b]) => r > 180 && g < 90 && b < 90, isBlue = ([r, g, b]) => b > 180 && r < 90 && g < 90
+  const isGray = ([r, g, b]) => Math.abs(r - 128) < 45 && Math.abs(g - 128) < 45 && Math.abs(b - 128) < 45
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-plain.mp4'), overlays: [lrItem({})] })
+  check('V2 overlay without transform: left red, right blue', isRed(lrPixel('v2-plain.mp4', 2, 270, 240)) && isBlue(lrPixel('v2-plain.mp4', 2, 370, 240)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-fliph.mp4'), overlays: [lrItem({ flipH: true })] })
+  check('V2 overlay flipH swaps left and right', isBlue(lrPixel('v2-fliph.mp4', 2, 270, 240)) && isRed(lrPixel('v2-fliph.mp4', 2, 370, 240)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-flipv.mp4'), overlays: [lrItem({ flipV: true })] })
+  check('V2 overlay flipV keeps left red / right blue (symmetric vertically)', isRed(lrPixel('v2-flipv.mp4', 2, 270, 240)) && isBlue(lrPixel('v2-flipv.mp4', 2, 370, 240)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-rot90.mp4'), overlays: [lrItem({ rotation: 90 })] })
+  check('V2 overlay rotated 90 clockwise: red goes to the top, blue to the bottom', isRed(lrPixel('v2-rot90.mp4', 2, 320, 190)) && isBlue(lrPixel('v2-rot90.mp4', 2, 320, 290)))
+  check('V2 overlay rotated 90 stays centred: corners of the 160x160 box covered, just outside is gray', !isGray(lrPixel('v2-rot90.mp4', 2, 245, 165)) && isGray(lrPixel('v2-rot90.mp4', 2, 232, 165)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-rot180.mp4'), overlays: [lrItem({ rotation: 180 })] })
+  check('V2 overlay rotated 180: left blue, right red', isBlue(lrPixel('v2-rot180.mp4', 2, 270, 240)) && isRed(lrPixel('v2-rot180.mp4', 2, 370, 240)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-rot45.mp4'), overlays: [lrItem({ rotation: 45 })] })
+  const rotInfo = await ops.probe(p('v2-rot45.mp4'))
+  check('V2 overlay rotated 45: frame size kept, centre covered, corner of the old box now gray', rotInfo.width === 640 && rotInfo.height === 480 && !isGray(lrPixel('v2-rot45.mp4', 2, 300, 240)) && isGray(lrPixel('v2-rot45.mp4', 2, 243, 163)))
+  await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-fade.mp4'), overlays: [lrItem({ start: 1, out: 3, fadeIn: 1, fadeOut: 1 })] })
+  check('V2 fade in: nearly transparent at the start, fully visible after the fade', isGray(lrPixel('v2-fade.mp4', 1.05, 270, 240)) && isRed(lrPixel('v2-fade.mp4', 2, 270, 240)))
+  check('V2 fade out: visible before the fade, nearly transparent at the end', isRed(lrPixel('v2-fade.mp4', 2, 270, 240)) && isGray(lrPixel('v2-fade.mp4', 3.9, 270, 240)))
+  let badRotation = false
+  try { await ops.compositeVideoOverlays({ input: p('gray-base.mp4'), output: p('v2-bad.mp4'), overlays: [lrItem({ rotation: 999 })] }) } catch { badRotation = true }
+  check('V2 overlay rejects an out-of-range rotation', badRotation)
 
   console.log('\n11) Audio timeline (cho phu de da clip)')
   await ops.buildTimelineAudioWav(clips, p('tl.wav'))

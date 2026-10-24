@@ -133,5 +133,14 @@ const groupKeys = [...catalogSource.matchAll(/key: '(sticker_group_[a-z]+)'/g)].
 const groupKeysMissing = groupKeys.flatMap((key) => ['vi', 'en'].filter((lang) => !dictionaries[lang].has(key)).map((lang) => `${key} (${lang})`))
 check(`moi nhom sticker (${groupKeys.length}) co nhan trong i18n vi va en`, groupKeys.length > 0 && groupKeysMissing.length === 0, groupKeysMissing)
 
+// Xuat: moi thuoc tinh cua lop hinh phai duoc map tu state sang payload gui bo ghep (de quen thi xoay / lat / mo chi co o xem truoc)
+const appSource = fs.readFileSync(path.join(rendererDir, 'App.jsx'), 'utf8')
+const overlayProps = ['rotation', 'flipH', 'flipV', 'fadeIn', 'fadeOut', 'opacity', 'width', 'height', 'sticker']
+const exportMap = /videoOverlays: withLayerZIndex\(videoOverlays, tracks\)[^\n]*\.map\(\(\{([^}]*)\}\) => \(\{\s*([^}]*)\}\)\)/.exec(appSource)
+const hasProp = (text, prop) => new RegExp('\\b' + prop + '\\b').test(text)
+check('xuat truyen du thuoc tinh lop hinh (xoay, lat, mo vao / ra, trong suot, kich thuoc, sticker) cho bo ghep',
+  !!exportMap && overlayProps.every((prop) => hasProp(exportMap[1], prop) && hasProp(exportMap[2], prop)),
+  exportMap ? overlayProps.filter((prop) => !hasProp(exportMap[2], prop)) : ['khong tim thay doan map videoOverlays khi xuat'])
+
 console.log(`\n================  ${pass} PASS / ${fail} FAIL  ================`)
 process.exit(fail ? 1 : 0)

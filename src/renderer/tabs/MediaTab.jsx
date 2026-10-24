@@ -117,24 +117,6 @@ export default function MediaTab({ clips, selId, setSelId, layout, seekGlobal, o
         })}
         {!assets.length && <div className="cc-hint">{libraryAssets.length ? t('media_no_match') : <>{t('drop_hint')}<br />{t('drop_hint2')}</>}</div>}
       </div>
-      {videoOverlays.length > 0 && <section className="cc-v2-controls">
-        <h4>{t('v2_track')}</h4>
-        {videoOverlays.map((item) => <div key={item.id} className="cc-v2-control-item">
-          <strong title={item.name || item.path}>{item.name || item.path.split(/[\\/]/).pop()}</strong>
-          <label>{t('v2_width')} <output>{Math.round(item.width * 100)}%</output>
-            <input type="range" min="0.1" max="2" step="0.05" value={item.width}
-              onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { width: Number(event.target.value) })} />
-          </label>
-          <label>{t('v2_height')} <output>{Math.round(item.height * 100)}%</output>
-            <input type="range" min="0.1" max="2" step="0.05" value={item.height}
-              onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { height: Number(event.target.value) })} />
-          </label>
-          <label>{t('v2_opacity')} <output>{Math.round(item.opacity * 100)}%</output>
-            <input type="range" min="0" max="1" step="0.05" value={item.opacity}
-              onPointerDown={beginVideoOverlayEdit} onFocus={beginVideoOverlayEdit} onBlur={endVideoOverlayEdit} onChange={(event) => updateVideoOverlay(item.id, { opacity: Number(event.target.value) })} />
-          </label>
-        </div>)}
-      </section>}
     </>
   )
 }

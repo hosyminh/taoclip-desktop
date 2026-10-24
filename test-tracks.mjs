@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   normalizeTracks, defaultTracks, makeTrack, MIN_LANES, isCoreTrack, videoTracksOf, audioTracksOf, nextTrackNumber, layerIndex, withLayerZIndex,
   audibleTrackIds, visibleVideoTrackIds, itemSpan, spansOverlap, occupiedSpans, choosePlacement, assignDefaultTracks,
-  clipAudioSpans, buildDetachedAudioItem, insertIndexForTime, parseTrackId, peakOverlap, MANY_LAYERS
+  clipAudioSpans, buildDetachedAudioItem, insertIndexForTime, parseTrackId, peakOverlap, MANY_LAYERS, fadeFactor
 } from './src/renderer/track-model.js'
 import { normalizeProject as normalizeProjectFull, activeTimeline } from './src/renderer/project-model.js'
 // Cac kiem tra cu doc noi dung o muc du an: tran noi dung timeline dang mo len de giu nguyen cach viet.
@@ -141,6 +141,16 @@ test('peakOverlap: so item chong nhau nhieu nhat; sat nhau khong tinh; rong / ro
   assert.equal(peakOverlap([item('a', 'V2', 0, 0), item('b', 'V3', 1, 0)]), 0)
   assert.equal(peakOverlap([item('a', 'V2', 1, 2, { loop: true }), item('b', 'V3', 2, 1)], { totalDuration: 10 }), 2, 'loop keo toi het timeline')
   assert.equal(MANY_LAYERS, 6)
+})
+
+test('fadeFactor: mo vao tang dan, mo ra giam dan, giua item = 1, khong dung thi = 1', () => {
+  const it = { start: 2, in: 0, out: 4, speed: 1, fadeIn: 1, fadeOut: 2 }
+  const at = (time) => Number(fadeFactor(it, time).toFixed(3))
+  assert.deepEqual([2, 2.5, 3, 3.5, 4, 5, 6].map(at), [0, 0.5, 1, 1, 1, 0.5, 0])
+  assert.equal(fadeFactor({ start: 0, in: 0, out: 2 }, 1), 1, 'khong fade')
+  assert.equal(fadeFactor({ start: 0, in: 0, out: 2, speed: 2, fadeOut: 0.5 }, 0.75), 0.5, 'theo do dai sau toc do (1s)')
+  assert.equal(fadeFactor({ start: 0, in: 0, out: 1, fadeIn: 1, fadeOut: 1 }, 0.5), 0.5, 'hai fade chong nhau lay gia tri nho hon')
+  assert.equal(fadeFactor(it, 99), 0, 'sau khi het item')
 })
 
 test('clipAudioSpans chi lay clip co tieng va chua tach; buildDetachedAudioItem giu in/out/toc do/vi tri', () => {

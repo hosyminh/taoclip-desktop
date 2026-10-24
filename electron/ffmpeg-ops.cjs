@@ -671,7 +671,7 @@ function burnSubtitles({ input, assFile, output, onProgress }) {
 }
 
 // ---------- Encode 1 clip (cat/toc do/loc mau) -> chuan hoa kich thuoc+fps -> TS ----------
-function encodeClipTS({ input, inPoint, outPoint, speed = 1, dims, cropMode = 'fit', cropX = 0.5, cropY = 0.5, colorFilter, hasAudio, anyAudio, fadeIn = false, fadeOut = false, fadeDur = 0.4, output, onProgress }) {
+function encodeClipTS({ input, inPoint, outPoint, speed = 1, dims, cropMode = 'fit', cropX = 0.5, cropY = 0.5, colorFilter, hasAudio, anyAudio, volume = 1, fadeIn = false, fadeOut = false, fadeDur = 0.4, output, onProgress }) {
   return new Promise((resolve, reject) => {
     const dur = Math.max(0.05, outPoint - inPoint)
     const outDur = dur / speed
@@ -689,6 +689,7 @@ function encodeClipTS({ input, inPoint, outPoint, speed = 1, dims, cropMode = 'f
     if (anyAudio && hasAudio) {
       const af = []
       if (speed !== 1) af.push(...buildAtempoChain(speed))
+      if (Number.isFinite(volume) && Math.abs(volume - 1) > 1e-6) af.push(`volume=${Math.max(0, Math.min(4, volume)).toFixed(4)}`) // am luong rieng cua clip
       if (fadeIn) af.push(`afade=t=in:st=0:d=${fd.toFixed(3)}`)
       if (fadeOut) af.push(`afade=t=out:st=${Math.max(0, outDur - fd).toFixed(3)}:d=${fd.toFixed(3)}`)
       if (af.length) args.push('-af', af.join(','))
@@ -833,7 +834,7 @@ async function exportClips({ clips, output, ratio, colorFilter, transition, edit
       } else {
         await encodeClipTS({
           input: c.input, inPoint: c.in, outPoint: c.out, speed: c.speed || 1, dims, cropMode: c.cropMode || 'fit', cropX: c.cropX, cropY: c.cropY, colorFilter: clipColorFilter(c),
-          hasAudio: clipHasAudio(i), anyAudio, output: out,
+          hasAudio: clipHasAudio(i), anyAudio, volume: Number(c.volume ?? 1), output: out,
           fadeIn: fade && i > 0, fadeOut: fade && i < clips.length - 1, fadeDur, onProgress: onSeg
         })
       }
@@ -865,6 +866,8 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     const start = Number(item.start), sourceIn = Number(item.in || 0), sourceOut = Number(item.out)
     const speed = Number(item.speed || 1), opacity = Number(item.opacity ?? 1)
     const x = Number(item.x ?? 0.5), y = Number(item.y ?? 0.5), width = Number(item.width ?? 1), height = Number(item.height ?? 1)
+    const rotation = Number(item.rotation ?? 0), fadeIn = Number(item.fadeIn ?? 0), fadeOut = Number(item.fadeOut ?? 0)
+    if (![rotation, fadeIn, fadeOut].every(Number.isFinite) || Math.abs(rotation) > 360 || fadeIn < 0 || fadeOut < 0) throw new Error('Thông số xoay / mờ của track V2 không hợp lệ.')
     if (![start, sourceIn, sourceOut, speed, opacity, x, y, width, height].every(Number.isFinite) || start < 0 || sourceIn < 0 || sourceOut <= sourceIn || speed <= 0 || opacity < 0 || opacity > 1 || x < 0 || x > 1 || y < 0 || y > 1 || width <= 0 || width > 4 || height <= 0 || height > 4) {
       throw new Error('Thông số track V2 không hợp lệ.')
     }
@@ -874,7 +877,7 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     if (item.kind === 'image' && !item.animated) args.push('-loop', '1', '-framerate', '30', '-i', path.resolve(item.path))
     else if (item.kind === 'image') args.push('-stream_loop', '-1', '-i', path.resolve(item.path))
     else args.push('-ss', String(sourceIn), '-t', String(sourceOut - sourceIn), '-i', path.resolve(item.path))
-    valid.push({ start, end, sourceIn, speed, opacity, x, y, width, height })
+    valid.push({ start, end, sourceIn, speed, opacity, x, y, width, height, rotation, flipH: !!item.flipH, flipV: !!item.flipV, fadeIn, fadeOut })
   }
   if (!valid.length) return input
   const fc = [`[0:v]fps=30,format=yuv420p,setpts=PTS-STARTPTS[vbase]`]
@@ -883,11 +886,15 @@ async function compositeVideoOverlays({ input, overlays, output, onProgress }) {
     const inputIndex = index + 1
     const boxW = Math.max(2, Math.round(info.width * item.width / 2) * 2)
     const boxH = Math.max(2, Math.round(info.height * item.height / 2) * 2)
-    const px = (info.width * item.x - boxW / 2).toFixed(2)
-    const py = (info.height * item.y - boxH / 2).toFixed(2)
+    const cx = (info.width * item.x).toFixed(2), cy = (info.height * item.y).toFixed(2) // tam hinh; xoay lam khung phinh ra nen can theo tam (w / h la kich thuoc lop sau khi xoay)
     const layer = `[v2src${index}]`, out = index === valid.length - 1 ? '[v2out]' : `[v2${index}]`
-    fc.push(`[${inputIndex}:v]setpts=(PTS-STARTPTS)/${item.speed}+${item.start}/TB,scale=${boxW}:${boxH}:force_original_aspect_ratio=decrease,format=rgba,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0,colorchannelmixer=aa=${item.opacity}${layer}`)
-    fc.push(`${base}${layer}overlay=x=${px}:y=${py}:enable='between(t,${item.start.toFixed(4)},${item.end.toFixed(4)})':eof_action=pass:shortest=0:format=auto${out}`)
+    const radians = (item.rotation * Math.PI / 180).toFixed(6)
+    const flips = `${item.flipH ? ',hflip' : ''}${item.flipV ? ',vflip' : ''}`
+    const turn = item.rotation ? `,rotate=a=${radians}:ow=rotw(${radians}):oh=roth(${radians}):c=black@0` : ''
+    const fadeStart = item.start.toFixed(4), fadeEnd = Math.max(item.start, item.end - item.fadeOut).toFixed(4)
+    const fades = `${item.fadeIn > 0 ? `,fade=t=in:st=${fadeStart}:d=${item.fadeIn.toFixed(4)}:alpha=1` : ''}${item.fadeOut > 0 ? `,fade=t=out:st=${fadeEnd}:d=${item.fadeOut.toFixed(4)}:alpha=1` : ''}`
+    fc.push(`[${inputIndex}:v]setpts=(PTS-STARTPTS)/${item.speed}+${item.start}/TB${flips},scale=${boxW}:${boxH}:force_original_aspect_ratio=decrease,format=rgba,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0${turn}${fades},colorchannelmixer=aa=${item.opacity}${layer}`)
+    fc.push(`${base}${layer}overlay=x=${cx}-w/2:y=${cy}-h/2:enable='between(t,${item.start.toFixed(4)},${item.end.toFixed(4)})':eof_action=pass:shortest=0:format=auto${out}`)
     base = out
   })
   args.push('-filter_complex', fc.join(';'), '-map', '[v2out]', '-map', '0:a?', '-t', String(info.duration), ...vencArgs(), '-r', '30', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', path.resolve(output))
@@ -947,6 +954,7 @@ async function mixAudioTracks({ video, tracks = [], output, videoVol = 1, hasOri
     usable.push({ ...tk, sourceIn, sourceOut, sourceDuration, speed, start, remaining,
       segmentDuration: tk.loop ? remaining : Math.min(sourceDuration, remaining),
       volume: Math.max(0, Math.min(4, Number(tk.volume ?? tk.gain ?? 1))),
+      pan: Math.max(-1, Math.min(1, Number(tk.pan) || 0)),
       fadeIn: Math.max(0, Number(tk.fadeIn || 0)), fadeOut: Math.max(0, Number(tk.fadeOut || 0)) })
   }
   if (!usable.length && !hasOrigAudio) throw new Error('Không có track audio hợp lệ để trộn.')
@@ -965,6 +973,7 @@ async function mixAudioTracks({ video, tracks = [], output, videoVol = 1, hasOri
       filters.push(`afade=t=out:st=${Math.max(0, tk.segmentDuration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
     }
     filters.push(`volume=${tk.volume.toFixed(6)}`)
+    if (tk.pan) filters.push(`pan=stereo|c0=${(tk.pan > 0 ? 1 - tk.pan : 1).toFixed(4)}*c0|c1=${(tk.pan < 0 ? 1 + tk.pan : 1).toFixed(4)}*c1`) // can bang trai / phai
     if (tk.segmentDuration < tk.remaining) filters.push(`apad=whole_dur=${tk.remaining.toFixed(6)}`)
     filters.push(`adelay=${Math.round(tk.start * 1000)}:all=1`)
     const label = `[track${i}]`

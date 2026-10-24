@@ -726,7 +726,7 @@ ipcMain.handle('dialog:relinkMedia', async (_e, kind) => {
 // nhieu clip HOAC co anh (slideshow) -> exportClips (ghep tung doan)
 async function coreExport(opts, output, onProgress) {
   const colorFilter = ops.buildColorFilter(opts.filterKey || 'none', opts.filterIntensity ?? 100)
-  const useClips = opts.clips && (opts.clips.length > 1 || opts.clips.some((c) => c.kind === 'image' || c.audioDetached || c.audioMuted || c.enhance))
+  const useClips = opts.clips && (opts.clips.length > 1 || opts.clips.some((c) => c.kind === 'image' || c.audioDetached || c.audioMuted || c.enhance || (c.volume != null && Math.abs(Number(c.volume) - 1) > 1e-6)))
   if (useClips) return ops.exportClips({ clips: opts.clips, output, ratio: opts.ratio, colorFilter, transition: opts.transition, editPlan: opts.editPlan, onProgress })
   const c = opts.clips && opts.clips[0]
   return ops.exportVideo({

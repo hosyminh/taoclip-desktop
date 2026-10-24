@@ -2,6 +2,7 @@ import React from 'react'
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 import { useI18n } from './i18n.jsx'
 import { fmt, isImg, clipOut, SPEEDS, SLIDE_DURS } from './utils.js'
+import { ItemProps, MultiProps, TextProps } from './ItemInspector.jsx'
 
 // Vi tri nhanh cua hinh trong khung kieu Fill: [cropX, cropY, mui ten chi phan hinh dang hien]
 const CROP_ANCHORS = [[0, 0, '↖'], [0.5, 0, '↑'], [1, 0, '↗'], [0, 0.5, '←'], [0.5, 0.5, '•'], [1, 0.5, '→'], [0, 1, '↙'], [0.5, 1, '↓'], [1, 1, '↘']]
@@ -12,7 +13,8 @@ export default function Inspector({
   width, hasClips, single, ratio, setRatio, safeZone, setSafeZone,
   selectedClip, moveClip, deleteClip, updateClip, pushHistory, beginEdit, endEdit, setAllSlideDur,
   onDetectSilence, busy, canDetectSilence, autoInfo, autoCut, setAutoCut, status,
-  silenceParams, updateSilenceAnalysis, applySilenceAnalysis, onPreviewSilence, silenceStale
+  silenceParams, updateSilenceAnalysis, applySilenceAnalysis, onPreviewSilence, silenceStale,
+  selectedItem, selectedText, multiCount = 0, onUpdateItem, onRemoveItem, onDuplicateItem, onMultiDuplicate, onMultiMute, onMultiDelete, onOpenText
 }) {
   const { t } = useI18n()
   const style = width ? { width } : undefined
@@ -20,6 +22,13 @@ export default function Inspector({
   return (
     <aside className="cc-insp" style={style}>
       <div className="sec-title">{t('clip_props')}</div>
+      {multiCount > 1
+        ? <MultiProps count={multiCount} onDuplicate={onMultiDuplicate} onMute={onMultiMute} onDelete={onMultiDelete} />
+        : selectedItem
+          ? <ItemProps key={`${selectedItem.kind}:${selectedItem.item.id}`} kind={selectedItem.kind} item={selectedItem.item} trackName={selectedItem.trackName}
+            update={onUpdateItem} onRemove={onRemoveItem} onDuplicate={onDuplicateItem} beginEdit={beginEdit} endEdit={endEdit} pushHistory={pushHistory} />
+          : selectedText ? <TextProps overlay={selectedText} onOpen={onOpenText} /> : null}
+
       <div className="grp">
         <label>{t('aspect')}</label>
         <div className="seg wrap">
@@ -29,8 +38,8 @@ export default function Inspector({
           <small className="cap-hint">{t('safezone_hint')}</small>
       </div>
 
-      {selectedClip && (
-        <div className="grp">
+      {!(multiCount > 1 || selectedItem || selectedText) && selectedClip && (
+        <div className="grp" data-inspector="clip">
           <label>{t('clip_selected')}: <b>{selectedClip.name}</b></label>
           <div className="seg"><button onClick={() => moveClip(selectedClip.id, -1)} title={t('move_left')}><ChevronLeft size={15} /></button><button onClick={() => moveClip(selectedClip.id, 1)} title={t('move_right')}><ChevronRight size={15} /></button><button onClick={() => deleteClip(selectedClip.id)} title={t('del_clip')}><Trash2 size={15} /></button></div>
           {isImg(selectedClip) ? (
@@ -64,6 +73,12 @@ export default function Inspector({
               <div className="kv"><span>{t('trim_len')}</span><b>{fmt(clipOut(selectedClip))}</b></div>
             </>
           )}
+          {!isImg(selectedClip) && selectedClip.src?.hasAudio && !selectedClip.audioDetached && <>
+            <label style={{ marginTop: 10 }}>{t('clip_volume')} <b>{Math.round((selectedClip.volume ?? 1) * 100)}%</b></label>
+            <input type="range" min="0" max="2" step="0.05" value={selectedClip.volume ?? 1} data-prop="clipVolume"
+              onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit} onChange={(e) => updateClip(selectedClip.id, { volume: Number(e.target.value) })} />
+            {(selectedClip.volume ?? 1) > 1 && <small className="cap-hint">{t('clip_volume_hint')}</small>}
+          </>}
           <label style={{ marginTop: 10 }}>{t('crop_mode_title')}</label>
           <div className="seg"><button className={(selectedClip.cropMode || 'fit') === 'fit' ? 'on' : ''} disabled={(selectedClip.cropMode || 'fit') === 'fit'} onClick={() => { pushHistory(); updateClip(selectedClip.id, { cropMode: 'fit' }) }}>{t('crop_fit')}</button>
             <button className={selectedClip.cropMode === 'fill' ? 'on' : ''} disabled={selectedClip.cropMode === 'fill'} onClick={() => { pushHistory(); updateClip(selectedClip.id, { cropMode: 'fill' }) }}>{t('crop_fill')}</button></div>

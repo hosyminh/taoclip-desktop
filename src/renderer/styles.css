@@ -16,10 +16,15 @@
   --accent: #3a7afe;       /* xanh duong CapCut */
   --accent2: #2f6bf0;
   --brand: #ff4d6d;        /* do/hong: hanh dong xoa, loi */
+  --accent-fill: #2f6bf0;  /* nen nut chinh: chu trang dat AA (4.7:1) */
+  --accent-fill-hover: #2459c9;
+  --accent-soft: rgba(58,122,254,.16); /* nen nut dang chon, hover */
+  --accent-ring: 0 0 0 3px rgba(58,122,254,.42); /* focus ring cho ban phim */
 }
 html, body, #root { height: 100%; }
 body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; font-size: 13px; }
-button { font-family: inherit; cursor: pointer; }
+button { font-family: inherit; cursor: pointer; transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .08s; }
+button:focus-visible, select:focus-visible { outline: none; box-shadow: var(--accent-ring); }
 small { color: var(--muted); font-size: 11px; }
 
 /* Scrollbar manh (mac dinh Windows ~17px -> 8px) */
@@ -48,9 +53,11 @@ small { color: var(--muted); font-size: 11px; }
 .cc-lang { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 7px 8px; border-radius: 8px; font-size: 12px; cursor: pointer; outline: none; }
 .cc-lang:hover { border-color: var(--accent); }
 .cc-lang option { background: var(--panel2); color: var(--text); }
-.cc-export { background: var(--accent); border: none; color: #fff; padding: 8px 20px; border-radius: 8px; font-weight: 700; }
-.cc-export:hover:not(:disabled) { background: var(--accent2); }
-.cc-export:disabled { opacity: .45; cursor: not-allowed; }
+/* Nut chinh (dac): Xuat, Nhap media, Phat, thong bao co hanh dong */
+.cc-export { background: var(--accent-fill); border: none; color: #fff; padding: 8px 20px; border-radius: 8px; font-weight: 600; box-shadow: 0 4px 14px -6px rgba(47,107,240,.7); }
+.cc-export:hover:not(:disabled) { background: var(--accent-fill-hover); box-shadow: 0 6px 18px -6px rgba(47,107,240,.85); }
+.cc-export:active:not(:disabled) { transform: scale(.98); }
+.cc-export:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 
 /* ---------- THAN TREN ---------- */
 /* Can icon (Lucide) trong nut */
@@ -79,8 +86,9 @@ svg { flex-shrink: 0; }
 
 /* LIB */
 .cc-lib { width: 290px; background: var(--panel); border-right: 1px solid var(--line); padding: 14px; overflow-y: auto; }
-.cc-import { width: 100%; background: var(--accent); border: none; color: #fff; padding: 11px; border-radius: 9px; font-weight: 700; margin-bottom: 14px; }
-.cc-import:hover { background: var(--accent2); }
+.cc-import { width: 100%; background: var(--accent-fill); border: none; color: #fff; padding: 11px; border-radius: 8px; font-weight: 600; margin-bottom: 14px; box-shadow: 0 4px 14px -6px rgba(47,107,240,.7); }
+.cc-import:hover { background: var(--accent-fill-hover); }
+.cc-import:active { transform: scale(.98); }
 .cc-import-row { display: flex; gap: 8px; margin-bottom: 14px; }
 .cc-import-row .cc-import { margin-bottom: 0; }
 .cc-import-progress { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 10px; color: var(--muted); font-size: 11px; }
@@ -149,8 +157,8 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-pctrl .btns { display: flex; gap: 8px; align-items: center; }
 .cc-pctrl button { background: transparent; border: none; color: var(--text); font-size: 15px; width: 32px; height: 32px; border-radius: 8px; }
 .cc-pctrl button:hover { background: var(--panel3); }
-.cc-pctrl .play { background: var(--accent); color: #fff; width: 38px; height: 38px; font-size: 16px; }
-.cc-pctrl .play:hover { background: var(--accent2); }
+.cc-pctrl .play { background: var(--accent-fill); color: #fff; width: 38px; height: 38px; font-size: 16px; box-shadow: 0 4px 12px -4px rgba(47,107,240,.7); }
+.cc-pctrl .play:hover { background: var(--accent-fill-hover); }
 .cc-pctrl button.on { color: var(--accent); background: var(--panel3); }
 .cc-pctrl .vol { display: flex; align-items: center; gap: 6px; position: absolute; right: 18px; }
 .cc-pctrl .vol input { width: 70px; accent-color: var(--accent); }
@@ -237,7 +245,9 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .seg.wrap { flex-wrap: wrap; }
 .seg.vert { flex-direction: column; }
 .seg button { flex: 1; min-width: 40px; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px; border-radius: 8px; }
-.seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+/* Nut dang chon: nen xanh nhat + vien xanh, khong chói nhu nut dac */
+.seg button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); font-weight: 600; }
+.seg button:hover:not(.on):not(:disabled) { border-color: var(--accent); }
 .grp input[type=range] { width: 100%; accent-color: var(--accent); margin: 10px 0 4px; }
 .kv { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .kv span { color: var(--muted); }
@@ -246,8 +256,9 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .status { font-size: 11px; color: var(--accent); word-break: break-all; }
 .chk { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); margin-top: 10px; cursor: pointer; }
 .chk input { accent-color: var(--accent); width: 15px; height: 15px; }
-.cc-auto { width: 100%; background: var(--panel2); border: 1px solid var(--accent); color: var(--accent); padding: 10px; border-radius: 9px; font-weight: 600; }
-.cc-auto:hover:not(:disabled) { background: var(--accent); color: #fff; }
+/* Nut vien (outline): viền xanh, hover tô đặc */
+.cc-auto { width: 100%; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 10px; border-radius: 8px; font-weight: 600; }
+.cc-auto:hover:not(:disabled) { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
 .cc-auto:disabled { opacity: .4; border-color: var(--line); color: var(--muted); cursor: not-allowed; }
 /* TTS engine / Google */
 .cc-select { width: 100%; background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px; font-size: 13px; font-family: inherit; outline: none; }
@@ -267,7 +278,7 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .crop-anchors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 108px; }
 .crop-anchors button { height: 30px; padding: 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 14px; line-height: 1; }
 .crop-anchors button:hover { border-color: var(--accent); color: var(--text); }
-.crop-anchors button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.crop-anchors button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
 
 /* ---------- TIMELINE ---------- */
 .cc-tl { height: 280px; background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; }
@@ -319,6 +330,7 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-tlbar .tb-compact.on { border-color: var(--accent); color: var(--accent); }
 .cc-tlbar .tb-compact small { font-size: 10px; font-weight: 700; }
 .cc-tlbar .tb-warn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid #ffb25f; border-radius: 7px; color: #ffcf99; font-size: 11px; white-space: nowrap; }
+.cc-insp .ip-sec { margin: 12px 0 4px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
 .cc-marker { position: absolute; top: 0; height: 26px; z-index: 6; display: flex; align-items: flex-start; gap: 3px; margin-left: -4px; cursor: pointer; }
 .cc-marker .flag { width: 8px; height: 15px; background: #ffb25f; clip-path: polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%); }
 .cc-marker:hover .flag { background: #ffd34e; }
@@ -435,8 +447,8 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 }
 .cc-toast span { flex: 1; word-break: break-word; }
 .cc-toast.err { border-left-color: var(--brand); }
-.cc-toast .act { background: var(--accent); border: none; color: #fff; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-.cc-toast .act:hover { background: var(--accent2); }
+.cc-toast .act { background: var(--accent-fill); border: none; color: #fff; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.cc-toast .act:hover { background: var(--accent-fill-hover); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* ---------- MODAL PHIM TAT ---------- */

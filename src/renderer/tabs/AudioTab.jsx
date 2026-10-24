@@ -66,29 +66,6 @@ export default function AudioTab({
           <button className="cc-import" onClick={() => addAudioItems('music')} disabled={!hasClips}>{t('audio_add_music_items')}</button>
           <button className="cc-import alt" onClick={() => addAudioItems('voice')} disabled={!hasClips}>{t('audio_add_voice_items')}</button>
         </div>
-        {audioItems.map((item) => <div className={`cc-audio-item ${item.track}`} key={item.id}>
-          <div className="cc-audio-item-head"><strong title={item.path}>{item.name}</strong>
-            <button className="cap-del" onClick={() => removeAudioItem(item.id)}><X size={13} /></button></div>
-          <label>{t('audio_pos')} <input type="number" min="0" step="0.1" value={item.start}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { start: Math.max(0, Number(event.target.value) || 0) })} /> {t('unit_sec')}</label>
-          <label>{t('audio_trim_in')} <input type="number" min="0" max={Math.max(0, item.out - 0.05)} step="0.1" value={item.in}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { in: Math.min(item.out - 0.05, Math.max(0, Number(event.target.value) || 0)) })} /> {t('unit_sec')}</label>
-          <label>{t('audio_trim_out')} <input type="number" min={item.in + 0.05} max={item.sourceDuration || 600} step="0.1" value={item.out}
-            onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { out: Math.min(item.sourceDuration || 600, Math.max(item.in + 0.05, Number(event.target.value) || item.in + 0.05)) })} /> {t('unit_sec')}</label>
-          <label>Gain <b>{Math.round(item.gain * 100)}%</b></label>
-          <input type="range" min="0" max="2" step="0.05" value={item.gain} onPointerDown={beginEdit} onFocus={beginEdit} onBlur={endEdit}
-            onChange={(event) => updateAudioItem(item.id, { gain: Number(event.target.value) })} />
-          <div className="cc-audio-item-fades">
-            <label>Fade in <input type="number" min="0" max="10" step="0.1" value={item.fadeIn}
-              onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { fadeIn: Math.max(0, Number(event.target.value) || 0) })} /></label>
-            <label>Fade out <input type="number" min="0" max="10" step="0.1" value={item.fadeOut}
-              onFocus={beginEdit} onBlur={endEdit} onChange={(event) => updateAudioItem(item.id, { fadeOut: Math.max(0, Number(event.target.value) || 0) })} /></label>
-          </div>
-          <div className="cc-audio-item-fades">
-            <label><input type="checkbox" checked={item.loop} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { loop: event.target.checked }) }} /> {t('audio_loop')}</label>
-            <label><input type="checkbox" checked={item.muted} onChange={(event) => { pushHistory(); updateAudioItem(item.id, { muted: event.target.checked }) }} /> {t('audio_item_mute')}</label>
-          </div>
-        </div>)}
         {!audioItems.length && <small className="cap-hint">{t('audio_items_hint')}</small>}
       </Sec>
 

@@ -201,6 +201,7 @@ function normalizeTimeline(migrated, makeId) {
       cropMode,
       audioDetached: kind === 'video' && !!clip.audioDetached,
       audioMuted: kind === 'video' && !!clip.audioMuted,
+      volume: kind === 'video' ? finite(clip.volume ?? 1, `clips[${index}].volume`, { min: 0, max: 2 }) : 1,
       enhance: !!clip.enhance,
       cropX: finite(clip.cropX ?? 0.5, `clips[${index}].cropX`, { min: 0, max: 1 }),
       cropY: finite(clip.cropY ?? 0.5, `clips[${index}].cropY`, { min: 0, max: 1 }),
@@ -242,6 +243,8 @@ function normalizeTimeline(migrated, makeId) {
       width: finite(item.width ?? 1, `videoOverlays[${index}].width`, { min: 0.001, max: 4 }),
       height: finite(item.height ?? 1, `videoOverlays[${index}].height`, { min: 0.001, max: 4 }),
       opacity: finite(item.opacity ?? 1, `videoOverlays[${index}].opacity`, { min: 0, max: 1 }),
+      rotation: finite(item.rotation ?? 0, `videoOverlays[${index}].rotation`, { min: -360, max: 360 }), flipH: !!item.flipH, flipV: !!item.flipV,
+      fadeIn: finite(item.fadeIn ?? 0, `videoOverlays[${index}].fadeIn`, { min: 0, max: 60 }), fadeOut: finite(item.fadeOut ?? 0, `videoOverlays[${index}].fadeOut`, { min: 0, max: 60 }),
       zIndex: finite(item.zIndex ?? index, `videoOverlays[${index}].zIndex`), missing: !!item.missing
     }
   })
@@ -257,6 +260,7 @@ function normalizeTimeline(migrated, makeId) {
     return { ...item, id: item.id || makeId('audio', index), track, start, in: sourceIn, out: sourceOut,
       speed: finite(item.speed ?? 1, `audioItems[${index}].speed`, { min: 0.05, max: 16 }),
       gain: finite(item.gain ?? 1, `audioItems[${index}].gain`, { min: 0, max: 4 }),
+      pan: finite(item.pan ?? 0, `audioItems[${index}].pan`, { min: -1, max: 1 }),
       fadeIn: finite(item.fadeIn ?? 0, `audioItems[${index}].fadeIn`, { min: 0 }),
       fadeOut: finite(item.fadeOut ?? 0, `audioItems[${index}].fadeOut`, { min: 0 }),
       loop: !!item.loop, muted: !!item.muted, missing: !!item.missing }

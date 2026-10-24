@@ -440,7 +440,7 @@ scenario('tha file tu he dieu hanh vao cua so them clip', async () => {
   } finally { app.close() }
 })
 
-require('./scenarios-timelines.cjs')({ scenario, check, near, fx, launchApp, projectOf, probeDuration, sleep })
+require('./scenarios-timelines.cjs')({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, sleep })
 
 ;(async () => {
   for (const { name, fn } of scenarios) {

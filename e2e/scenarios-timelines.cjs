@@ -2,7 +2,7 @@
 const fs = require('fs')
 const path = require('path')
 
-module.exports = function register({ scenario, check, near, fx, launchApp, projectOf, probeDuration, sleep }) {
+module.exports = function register({ scenario, check, near, fx, launchApp, projectOf, probeDuration, rmsAt, sleep }) {
   const winPath = (p) => p.replace(/\//g, '\\')
   const tabs = (app) => app.eval(`[...document.querySelectorAll('.cc-tltab')].map((el) => ({ id: el.dataset.tl, name: (el.querySelector('.nm') || el.querySelector('.nm-edit'))?.textContent || el.querySelector('.nm-edit')?.value, on: el.getAttribute('aria-selected') === 'true', closable: !!el.querySelector('.x') }))`)
   const names = async (app) => (await tabs(app)).map((tab) => tab.name)
@@ -649,6 +649,200 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
       check('an bot mot lop (con 6): canh bao bien mat', true)
       check('khong co loi runtime', busy.errors.length === 0, busy.errors.slice(0, 2).join(' | '))
     } finally { busy.close() }
+  })
+
+  scenario('bang thuoc tinh theo muc dang chon: V1, lop hinh, sticker, tieng, chu, nhieu muc; sua so, khoa ti le, hoan tac', async () => {
+    const overlay = (id, extra) => ({ id, name: id, start: 1, in: 0, out: 3, x: 0.5, y: 0.5, width: 0.4, height: 0.2, opacity: 1, ...extra })
+    const project = projectOf(fx, {
+      videoOverlays: [
+        overlay('vid', { path: fx.videoA, kind: 'video', start: 1, in: 0, out: 4, sourceDuration: 5, speed: 1 }),
+        overlay('img', { path: fx.image, kind: 'image', start: 6 }),
+        overlay('stk', { sticker: 'twemoji/1f600', path: '', kind: 'image', start: 8, width: 0.2, height: 0.2 })],
+      audioItems: [{ id: 'aud', path: fx.toneA, name: 'aud', track: 'music', start: 0, in: 0, out: 3, gain: 1, sourceDuration: 3 }],
+      overlays: [{ id: 'txt', type: 'text', text: 'Chu thu', start: 2, end: 4, x: 0.5, y: 0.5, size: 0.07, color: '#ffffff' }]
+    })
+    const app = await launchApp({ project })
+    try {
+      await app.restoreProject()
+      await app.waitFor(`document.querySelectorAll('.cc-v2-clip').length === 3 && document.querySelectorAll('.cc-audio-item-clip').length === 1`, { label: 'item' })
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      const panel = () => app.eval(`document.querySelector('.cc-insp [data-inspector]')?.dataset.inspector || null`)
+      const prop = (name) => app.eval(`Number(document.querySelector('.cc-insp [data-prop="${name}"]').value)`)
+      const setProp = async (name, value) => {
+        await app.eval(`(() => { const el = document.querySelector('.cc-insp [data-prop="${name}"]'); el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '${value}'); el.dispatchEvent(new Event('input', { bubbles: true })); el.blur() })()`)
+        await sleep(150)
+      }
+      const geo = (selector) => app.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return [Math.round(parseFloat(el.style.left)), Math.round(parseFloat(el.style.width))] })()`)
+      check('chon clip V1: bang thuoc tinh clip (toc do, cat, vua khung...)', (await app.click('.cc-clip', 0), await sleep(150), await panel()) === 'clip')
+      // lop hinh video
+      await app.click('.cc-v2-clip[data-item-id="vid"]')
+      await app.waitFor(`document.querySelector('.cc-insp [data-inspector]')?.dataset.inspector === 'overlay'`, { label: 'bang lop hinh' })
+      check('chon video V2: bang thuoc tinh cua lop hinh (khong con hien clip V1)', (await panel()) === 'overlay' && (await app.count('.cc-insp [data-inspector="clip"]')) === 0)
+      check('hien dung gia tri: X 50, Y 50, rong 40, cao 20, bat dau 1, toc do 1', JSON.stringify([await prop('x'), await prop('y'), await prop('width'), await prop('height'), await prop('start'), await prop('speed')]) === '[50,50,40,20,1,1]')
+      await setProp('x', 30)
+      check('sua X = 30% -> vi tri trong khung xem trước doi (left 30%)', (await app.eval(`document.querySelector('.cc-frame .cc-v2-preview')?.parentElement?.style.left || document.querySelector('.cc-frame .cc-v2-preview')?.style.left || ''`)).startsWith('30') || (await prop('x')) === 30)
+      await app.key('z', 2)
+      await app.waitFor(`Number(document.querySelector('.cc-insp [data-prop="x"]').value) === 50`, { label: 'hoan tac X' })
+      check('Ctrl+Z hoan tac mot lan sua so', true)
+      // khoa ti le: rong 40 -> 80 thi cao 20 -> 40
+      await setProp('width', 80)
+      check('khoa ti le: rong 80% thi cao tu doi thanh 40%', (await prop('width')) === 80 && (await prop('height')) === 40, `(${await prop('width')} x ${await prop('height')})`)
+      await app.click('.cc-insp [data-prop="lock"]')
+      await setProp('height', 10)
+      check('tat khoa ti le: sua cao 10% khong doi rong (80%)', (await prop('height')) === 10 && (await prop('width')) === 80)
+      // thoi gian: bat dau + toc do
+      await setProp('start', 2)
+      const g1 = await geo('.cc-v2-clip[data-item-id="vid"]')
+      check('sua bat dau = 2s: item tren timeline dich toi 160px', g1[0] === 160, JSON.stringify(g1))
+      await setProp('speed', 2)
+      const g2 = await geo('.cc-v2-clip[data-item-id="vid"]')
+      check('toc do 2x: item ngan mot nua (4s -> 2s = 160px)', g2[1] === 160, JSON.stringify(g2))
+      await setProp('out', 99)
+      check('diem ra bi chan o het nguon (5s)', (await prop('out')) === 5, String(await prop('out')))
+      // anh va sticker: khong co diem vao / toc do
+      await app.click('.cc-v2-clip[data-item-id="img"]')
+      await app.waitFor(`!!document.querySelector('.cc-insp [data-prop="out"]') && !document.querySelector('.cc-insp [data-prop="speed"]')`, { label: 'bang anh' })
+      check('anh phu: co thoi luong, khong co diem vao / toc do', (await app.count('.cc-insp [data-prop="in"]')) === 0 && (await app.count('.cc-insp [data-prop="speed"]')) === 0)
+      await setProp('out', 6)
+      const g3 = await geo('.cc-v2-clip[data-item-id="img"]')
+      check('anh keo dai 6s tren timeline (480px), khong gioi han theo nguon', g3[1] === 480, JSON.stringify(g3))
+      await app.click('.cc-v2-clip[data-item-id="stk"]')
+      await app.waitFor(`document.querySelector('.cc-insp [data-inspector="overlay"] label b')?.textContent === 'stk'`, { label: 'bang sticker' })
+      check('sticker: bang thuoc tinh rieng (khong co diem vao / toc do)', (await app.count('.cc-insp [data-prop="speed"]')) === 0 && (await app.count('.cc-insp [data-prop="x"]')) === 1)
+      // tieng
+      await app.click('.cc-audio-item-clip[data-item-id="aud"]')
+      await app.waitFor(`document.querySelector('.cc-insp [data-inspector]')?.dataset.inspector === 'audio'`, { label: 'bang tieng' })
+      check('chon item tieng: bang thuoc tinh tieng (bat dau, cat, toc do, am luong, fade)', (await panel()) === 'audio' && (await app.count('.cc-insp [data-prop="speed"]')) === 1 && (await app.count('.cc-insp [data-prop="fadeIn"]')) === 1)
+      await setProp('speed', 2)
+      const ga = await geo('.cc-audio-item-clip[data-item-id="aud"]')
+      check('tieng toc do 2x: ngan mot nua (3s -> 1.5s = 120px)', ga[1] === 120, JSON.stringify(ga))
+      await setProp('fadeIn', 0.5)
+      check('fade in 0.5s ghi nhan', (await prop('fadeIn')) === 0.5)
+      // chu
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      await app.click('.cc-oclip')
+      await app.waitFor(`document.querySelector('.cc-insp [data-inspector]')?.dataset.inspector === 'text'`, { label: 'bang chu' })
+      check('chon chu: bang tom tat va nut mo tab Van ban', (await app.count('.cc-insp [data-inspector="text"] .cc-auto')) === 1)
+      // nhieu muc
+      await app.click('.cc-v2-clip[data-item-id="vid"]')
+      const p = await app.center('.cc-v2-clip[data-item-id="img"]')
+      await app.mouse('mouseMoved', p.x, p.y); await app.mouse('mousePressed', p.x, p.y, { modifiers: 2 }); await app.mouse('mouseReleased', p.x, p.y, { modifiers: 2 })
+      await app.waitFor(`document.querySelector('.cc-insp [data-inspector]')?.dataset.inspector === 'multi'`, { label: 'bang nhieu muc' })
+      check('chon nhieu muc: bang tom tat nhom', (await panel()) === 'multi')
+      // danh sach cu da bo
+      await app.key('Escape')
+      check('khong con danh sach "liet ke tat ca" o tab Media va tab Am thanh', (await app.count('.cc-v2-controls')) === 0 && (await app.count('.cc-audio-item:not(.cc-audio-item-clip)')) === 0)
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
+  })
+
+  scenario('xoay / lat / mo vao ra cho lop hinh: bang thuoc tinh, xem truoc, hoan tac, luu trong file', async () => {
+    const file = path.join(fx.dir, 'multi-transform.taoclip')
+    try { fs.rmSync(file, { force: true }) } catch {}
+    const project = projectOf(fx, { videoOverlays: [{ id: 'img', path: fx.image, name: 'img.png', kind: 'image', start: 1, in: 0, out: 3, x: 0.5, y: 0.5, width: 0.4, height: 0.2, opacity: 1 }] })
+    const app = await launchApp({ project, dialogs: { saveProject: file } })
+    try {
+      await app.restoreProject()
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      await app.click('.cc-v2-clip')
+      await app.waitFor(`!!document.querySelector('.cc-insp [data-prop="rotation"]')`, { label: 'bang thuoc tinh' })
+      const prop = (name) => app.eval(`Number(document.querySelector('.cc-insp [data-prop="${name}"]').value)`)
+      const setProp = async (name, value) => {
+        await app.eval(`(() => { const el = document.querySelector('.cc-insp [data-prop="${name}"]'); el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '${value}'); el.dispatchEvent(new Event('input', { bubbles: true })); el.blur() })()`)
+        await sleep(150)
+      }
+      const preview = () => app.eval(`(() => { const el = document.querySelector('.cc-frame .cc-v2-preview'); return el ? { transform: el.style.transform, opacity: Number(el.style.opacity) } : null })()`)
+      await app.seekTo(1.1)
+      await app.waitFor(`!!document.querySelector('.cc-frame .cc-v2-preview')`, { label: 'lop hinh trong khung xem' })
+      check('mac dinh: khong xoay, khong lat', (await prop('rotation')) === 0 && !(await preview()).transform.includes('rotate(90'))
+      await app.click('.cc-insp [data-act="rot-right"]')
+      await app.waitFor(`Number(document.querySelector('.cc-insp [data-prop="rotation"]').value) === 90`, { label: 'xoay phai 90' })
+      check('nut xoay phai 90 do: goc = 90, khung xem truoc xoay theo', (await preview()).transform.includes('rotate(90deg)'), (await preview()).transform)
+      await app.click('.cc-insp [data-act="rot-left"]')
+      await app.click('.cc-insp [data-act="rot-left"]')
+      await app.waitFor(`Number(document.querySelector('.cc-insp [data-prop="rotation"]').value) === -90`, { label: 'xoay trai 2 lan' })
+      check('xoay trai 2 lan tu 90: goc = -90', (await prop('rotation')) === -90)
+      await setProp('rotation', 45)
+      check('go goc 45 do: ghi nhan, xem truoc rotate(45deg)', (await prop('rotation')) === 45 && (await preview()).transform.includes('rotate(45deg)'))
+      await app.click('.cc-insp [data-act="flip-h"]')
+      await app.waitFor(`document.querySelector('.cc-insp [data-act="flip-h"]').getAttribute('aria-pressed') === 'true'`, { label: 'lat ngang' })
+      check('lat ngang: nut sang, xem truoc scale(-1, 1)', (await preview()).transform.includes('scale(-1, 1)'), (await preview()).transform)
+      await app.click('.cc-insp [data-act="flip-v"]')
+      await app.waitFor(`document.querySelector('.cc-insp [data-act="flip-v"]').getAttribute('aria-pressed') === 'true'`, { label: 'lat doc' })
+      check('lat doc: scale(-1, -1)', (await preview()).transform.includes('scale(-1, -1)'))
+      // hoan tac lat doc
+      await app.key('z', 2)
+      await app.waitFor(`document.querySelector('.cc-insp [data-act="flip-v"]').getAttribute('aria-pressed') === 'false'`, { label: 'hoan tac lat doc' })
+      check('Ctrl+Z hoan tac mot buoc (lat doc)', (await preview()).transform.includes('scale(-1, 1)'))
+      // mo vao 1s: tai 1.25s (0.25s sau khi bat dau) do trong suot ~ 0.25
+      await setProp('fadeIn', 1)
+      await app.seekTo(1.25)
+      await sleep(250)
+      const faded = await preview()
+      check('mo vao 1s: tai 0.25s sau khi bat dau, do trong suot ~0.25 trong khung xem', faded && faded.opacity > 0.1 && faded.opacity < 0.45, JSON.stringify(faded))
+      await app.seekTo(2.5)
+      await sleep(250)
+      check('sau khi mo xong: do trong suot day du (1)', Math.abs((await preview()).opacity - 1) < 0.01)
+      await setProp('fadeOut', 1)
+      await app.seekTo(3.75)
+      await sleep(250)
+      const out = await preview()
+      check('mo ra 1s: tai 0.25s truoc khi het, do trong suot ~0.25', out && out.opacity > 0.1 && out.opacity < 0.45, JSON.stringify(out))
+      // luu
+      await app.key('s', 2)
+      await app.waitFor(`document.querySelector('.cc-proj').title.endsWith('multi-transform.taoclip')`, { label: 'luu' })
+      const item = JSON.parse(fs.readFileSync(file, 'utf8')).timelines[0].videoOverlays[0]
+      check('file luu co xoay 45, lat ngang, mo vao / ra 1s', item.rotation === 45 && item.flipH === true && item.flipV === false && item.fadeIn === 1 && item.fadeOut === 1, JSON.stringify({ r: item.rotation, h: item.flipH, v: item.flipV, i: item.fadeIn, o: item.fadeOut }))
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
+  })
+
+  scenario('am luong rieng tung clip V1 va can bang trai / phai item tieng: bang thuoc tinh, luu, xuat that', async () => {
+    const file = path.join(fx.dir, 'multi-volume.taoclip')
+    const out = path.join(fx.dir, 'e2e-clip-volume.mp4')
+    for (const f of [file, out]) { try { fs.rmSync(f, { force: true }) } catch {} }
+    const single = { version: 4, projectId: 'e2e-volume-' + Math.random().toString(36).slice(2), clips: [{ id: 'c1', path: fx.videoA, name: 'video-a.mp4', kind: 'video', in: 0, out: 5, speed: 1 }],
+      audioItems: [{ id: 'aud', path: fx.toneA, name: 'aud', track: 'music', start: 4, in: 0, out: 1, gain: 1, sourceDuration: 3 }] }
+    const app = await launchApp({ project: single, dialogs: { saveProject: file, saveVideo: out.replace(/\\/g, '/') } })
+    try {
+      await app.restoreProject()
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      const setProp = async (name, value) => {
+        await app.eval(`(() => { const el = document.querySelector('.cc-insp [data-prop="${name}"]'); el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '${value}'); el.dispatchEvent(new Event('input', { bubbles: true })); el.blur() })()`)
+        await sleep(150)
+      }
+      await app.click('.cc-clip', 0)
+      await app.waitFor(`!!document.querySelector('.cc-insp [data-prop="clipVolume"]')`, { label: 'thanh am luong clip' })
+      check('clip V1 co tieng: bang thuoc tinh co thanh "Am luong clip" (mac dinh 100%)', Number(await app.eval(`document.querySelector('.cc-insp [data-prop="clipVolume"]').value`)) === 1)
+      await setProp('clipVolume', 0.5)
+      check('keo ve 50%: ghi nhan', Number(await app.eval(`document.querySelector('.cc-insp [data-prop="clipVolume"]').value`)) === 0.5)
+      await setProp('clipVolume', 1.5)
+      check('tren 100%: hien chu thich xem truoc toi da 100%', (await app.count('.cc-insp [data-inspector="clip"] .cap-hint')) >= 1 && Number(await app.eval(`document.querySelector('.cc-insp [data-prop="clipVolume"]').value`)) === 1.5)
+      await setProp('clipVolume', 0.5)
+      // can bang cua item tieng
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 99999`)
+      await app.click('.cc-audio-item-clip')
+      await app.waitFor(`!!document.querySelector('.cc-insp [data-prop="pan"]')`, { label: 'thanh can bang' })
+      await setProp('pan', -1)
+      check('item tieng: keo can bang ve ben trai hoan toan (-1) va co chu thich "chi khi xuat"', Number(await app.eval(`document.querySelector('.cc-insp [data-prop="pan"]').value`)) === -1 && (await app.count('.cc-insp [data-inspector="audio"] .cap-hint')) >= 1)
+      await app.key('s', 2)
+      await app.waitFor(`document.querySelector('.cc-proj').title.endsWith('multi-volume.taoclip')`, { label: 'luu' })
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')).timelines[0]
+      check('file luu co am luong clip 0.5 va can bang -1', saved.clips[0].volume === 0.5 && saved.audioItems[0].pan === -1, JSON.stringify({ v: saved.clips[0].volume, p: saved.audioItems[0].pan }))
+      // xuat that: bo item tieng truoc (khi co item, nguon mono duoc tron sang stereo nen muc doi -3 dB) de do dung am luong clip
+      await app.key('Delete')
+      await app.waitFor(`document.querySelectorAll('.cc-audio-item-clip').length === 0`, { label: 'xoa item tieng' })
+      // xuat that: am luong 0.5 -> muc tieng dau ra ~ mot nua nguon
+      await app.click('.cc-top .cc-export')
+      await app.waitFor(`!!document.querySelector('.cc-modal-box .exp-start')`, { label: 'hop thoai xuat' })
+      await app.eval(`[...document.querySelectorAll('.cc-modal-box .seg button')].find(b => b.textContent.trim() === '720p').click()`)
+      await app.eval(`[...document.querySelectorAll('.cc-modal-box .seg button')].find(b => b.textContent.trim() === 'Nhỏ gọn').click()`)
+      await app.click('.cc-modal-box .exp-start')
+      await app.waitFor(`!document.querySelector('.cc-modal-box')`, { timeout: 120000, label: 'xuat xong', interval: 500 })
+      const source = rmsAt(fx.videoA, 0.5, 0.6), exported = rmsAt(out, 0.5, 0.6)
+      check('xuat that: tieng clip chi con ~50% so voi nguon', source > 0.02 && Math.abs(exported / source - 0.5) < 0.12, `(${(exported / source).toFixed(2)})`)
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
   })
 
   // Keo giua V1 va cac duong phu, va khoi tieng goc A1 sang duong tieng khac
