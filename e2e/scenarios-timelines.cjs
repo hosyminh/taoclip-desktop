@@ -252,6 +252,25 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
     } finally { app.close() }
   })
 
+  scenario('keo doi cho clip tren V1 (ngang): clip cuoi keo len dau', async () => {
+    const app = await launchApp({ project: projectOf(fx) })
+    try {
+      await app.restoreProject()
+      await app.eval(`document.querySelector('.cc-tlscroll').scrollTop = 0`)
+      const titles = () => app.eval(`[...document.querySelectorAll('.cc-clip .strip')].map((el) => el.title).join()`)
+      check('truoc khi keo: video-a, video-b', (await titles()) === 'video-a.mp4,video-b.mp4')
+      const second = await app.center('.cc-clip .strip', 1)
+      const first = await app.center('.cc-clip .strip', 0)
+      await app.dragBy(second, { x: first.x - 100, y: first.y })
+      await app.waitFor(`document.querySelector('.cc-clip .strip').title === 'video-b.mp4'`, { label: 'doi cho' })
+      check('keo clip 2 len truoc clip 1: thu tu doi thanh video-b, video-a', (await titles()) === 'video-b.mp4,video-a.mp4')
+      await app.key('z', 2)
+      await app.waitFor(`document.querySelector('.cc-clip .strip').title === 'video-a.mp4'`, { label: 'hoan tac doi cho' })
+      check('Ctrl+Z tra lai thu tu cu', true)
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
+  })
+
   // Keo giua V1 va cac duong phu, va khoi tieng goc A1 sang duong tieng khac
   scenario('keo clip V1 len V3 thanh lop phu (don V1, mang theo tieng), keo lai xuong V1, hoan tac', async () => {
     const app = await launchApp({ project: projectOf(fx) })

@@ -368,7 +368,7 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 
 .cc-clip { position: absolute; top: 4px; height: 56px; background: #223247; border-radius: 8px; overflow: hidden; display: flex; align-items: center; border: 2px solid transparent; }
 .cc-clip.sel { border-color: #fff; }
-.cc-clip .strip { flex: 1; display: flex; align-items: center; height: 100%; overflow: hidden; pointer-events: none; }
+.cc-clip .strip { flex: 1; display: flex; align-items: center; height: 100%; overflow: hidden; }
 .cc-clip .strip img { height: 100%; width: auto; min-width: 30px; object-fit: cover; flex: 1 0 auto; }
 .cc-clip .cn { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #dfe7f5; padding: 0 12px; }
 .cc-clip .h { width: 10px; align-self: stretch; background: #fff; cursor: ew-resize; flex-shrink: 0; opacity: 0; z-index: 2; }
