@@ -163,6 +163,15 @@ img.cc-slide.kb { animation: kenburns 8s ease-out infinite alternate; }
 .cc-pctrl .vol { display: flex; align-items: center; gap: 6px; position: absolute; right: 18px; }
 .cc-pctrl .vol input { width: 70px; accent-color: var(--accent); }
 .cc-pctrl { position: relative; }
+.cc-format { position: absolute; left: 14px; }
+.cc-pctrl .cc-format-btn { display: inline-flex; align-items: center; gap: 5px; width: auto; height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); color: var(--text); font-size: 12px; font-weight: 600; }
+.cc-pctrl .cc-format-btn:hover, .cc-pctrl .cc-format-btn.on { border-color: var(--accent); color: var(--accent); background: var(--panel2); }
+.cc-format-menu { position: absolute; left: 0; bottom: 38px; z-index: 40; min-width: 210px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); box-shadow: 0 10px 28px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 2px; }
+.cc-format-menu .cap-hint { margin: 2px 6px 6px; font-size: 10.5px; line-height: 1.35; }
+.cc-pctrl .cc-format-menu button { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; height: 30px; padding: 0 8px; border-radius: 6px; font-size: 12px; text-align: left; }
+.cc-format-menu button.on { color: var(--accent); }
+.cc-format-menu .ck { display: inline-flex; width: 14px; }
+.cc-format-menu .sep { height: 1px; margin: 4px 2px; background: var(--line); }
 
 /* INSPECTOR */
 /* Caption overlay tren preview (mo phong ASS: chu trang, vien den, duoi-giua) */

@@ -26,6 +26,7 @@ import {
 import { DEFAULT_TRANSITION_STYLE } from './transition-styles.js'
 import { stickerChar } from './sticker-catalog.js'
 import Inspector from './Inspector.jsx'
+import PreviewFormat from './PreviewFormat.jsx'
 import ExportDialog from './ExportDialog.jsx'
 import TopBar from './TopBar.jsx'
 import ToastStack from './ToastStack.jsx'
@@ -3246,6 +3247,7 @@ export default function App() {
             {audioItems.map((item) => <AudioItemPreview key={item.id} item={item} current={current} playing={playing} totalDuration={totalDuration} audible={audibleIds.has(item.trackId)} />)}
           </div>
           <div className="cc-pctrl">
+            <PreviewFormat ratio={ratio} setRatio={changeRatio} safeZone={safeZone} setSafeZone={setSafeZone} />
             <span className="t">{fmt(current)}</span>
             <div className="btns">
               <button onClick={() => seekGlobal(0)} title={t('ctl_start')}><SkipBack size={16} /></button>
@@ -3265,7 +3267,6 @@ export default function App() {
 
         <div className="rsz v" onMouseDown={(e) => startPanelResize('insp', e)} />
         <Inspector width={inspW} hasClips={hasClips} single={single}
-          ratio={ratio} setRatio={changeRatio} safeZone={safeZone} setSafeZone={setSafeZone}
           selectedClip={selectedClip} moveClip={moveClip} deleteClip={deleteClip} updateClip={updateClip}
           {...inspectorSelection()}
           onUpdateItem={(patch) => (selItem?.kind === 'v2' ? updateVideoOverlay(selItem.id, patch) : selItem && updateAudioItem(selItem.id, patch))}

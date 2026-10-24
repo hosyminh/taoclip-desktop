@@ -7,10 +7,10 @@ import { ItemProps, MultiProps, TextProps } from './ItemInspector.jsx'
 // Vi tri nhanh cua hinh trong khung kieu Fill: [cropX, cropY, mui ten chi phan hinh dang hien]
 const CROP_ANCHORS = [[0, 0, '↖'], [0.5, 0, '↑'], [1, 0, '↗'], [0, 0.5, '←'], [0.5, 0.5, '•'], [1, 0.5, '→'], [0, 1, '↙'], [0.5, 1, '↓'], [1, 1, '↘']]
 
-// Bang thuoc tinh ben phai: ti le khung, clip dang chon, che do xuat,
-// chuyen canh, GPU, auto-cut, xuat them ti le
+// Bang thuoc tinh ben phai: thuoc tinh cua muc dang chon (clip V1, lop hinh, tieng, chu) va auto-cut.
+// Ti le khung / vung an toan la cai dat chung cua ca video nen o thanh duoi khung xem truoc (PreviewFormat.jsx).
 export default function Inspector({
-  width, hasClips, single, ratio, setRatio, safeZone, setSafeZone,
+  width, hasClips, single,
   selectedClip, moveClip, deleteClip, updateClip, pushHistory, beginEdit, endEdit, setAllSlideDur,
   onDetectSilence, busy, canDetectSilence, autoInfo, autoCut, setAutoCut, status,
   silenceParams, updateSilenceAnalysis, applySilenceAnalysis, onPreviewSilence, silenceStale,
@@ -29,14 +29,11 @@ export default function Inspector({
             update={onUpdateItem} onRemove={onRemoveItem} onDuplicate={onDuplicateItem} beginEdit={beginEdit} endEdit={endEdit} pushHistory={pushHistory} />
           : selectedText ? <TextProps overlay={selectedText} onOpen={onOpenText} /> : null}
 
-      <div className="grp">
-        <label>{t('aspect')}</label>
-        <div className="seg wrap">
-          {['9:16', '1:1', '4:5', '16:9', 'original'].map((r) => (<button key={r} className={ratio === r ? 'on' : ''} onClick={() => setRatio(r)}>{r === 'original' ? t('ratio_original') : r}</button>))}
+      {!(multiCount > 1 || selectedItem || selectedText || selectedClip) && (
+        <div className="grp" data-inspector="none">
+          <small className="cap-hint">{t('ip_nothing')}</small>
         </div>
-        <label className="chk"><input type="checkbox" checked={safeZone} onChange={(e) => setSafeZone(e.target.checked)} /> {t('safezone')}</label>
-          <small className="cap-hint">{t('safezone_hint')}</small>
-      </div>
+      )}
 
       {!(multiCount > 1 || selectedItem || selectedText) && selectedClip && (
         <div className="grp" data-inspector="clip">

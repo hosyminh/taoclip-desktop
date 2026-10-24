@@ -900,6 +900,56 @@ module.exports = function register({ scenario, check, near, fx, launchApp, proje
     } finally { pan.close() }
   })
 
+  scenario('ti le khung + vung an toan o thanh duoi khung xem truoc (ap dung ca video), khong con trong bang thuoc tinh clip', async () => {
+    const app = await launchApp({ project: projectOf(fx) })
+    try {
+      await app.restoreProject()
+      const frameRatio = () => app.eval(`document.querySelector('.cc-frame').style.aspectRatio`)
+      const buttonRatio = () => app.eval(`document.querySelector('.cc-format-btn').dataset.ratio`)
+      check('bang thuoc tinh clip khong con nhom "Ti le khung" / "Vung an toan"', !(await app.eval(`/Tỉ lệ khung|vùng an toàn/i.test(document.querySelector('.cc-insp').innerText)`)))
+      check('thanh duoi khung xem truoc co nut ti le (mac dinh 9:16)', (await buttonRatio()) === '9:16' && (await frameRatio()) === '9 / 16')
+      await app.click('.cc-format-btn')
+      await app.waitFor(`!!document.querySelector('.cc-format-menu')`, { label: 'menu ti le' })
+      const options = await app.eval(`[...document.querySelectorAll('.cc-format-menu [data-ratio-option]')].map((b) => b.dataset.ratioOption).join()`)
+      check('menu liet ke 9:16, 1:1, 4:5, 16:9, Goc va co ghi chu "ca video"', options === '9:16,1:1,4:5,16:9,original' && /CẢ video/.test(await app.text('.cc-format-menu')), options)
+      await app.click('.cc-format-menu [data-ratio-option="16:9"]')
+      await app.waitFor(`document.querySelector('.cc-frame').style.aspectRatio === '16 / 9'`, { label: 'doi sang 16:9' })
+      check('chon 16:9: khung xem truoc doi theo, menu dong', (await buttonRatio()) === '16:9' && (await app.count('.cc-format-menu')) === 0)
+      await app.key('z', 2)
+      await app.waitFor(`document.querySelector('.cc-frame').style.aspectRatio === '9 / 16'`, { label: 'hoan tac ti le' })
+      check('Ctrl+Z hoan tac doi ti le', (await buttonRatio()) === '9:16')
+      // vung an toan
+      check('chua bat: khong co vung an toan trong khung', (await app.count('.cc-frame .safe')) === 0)
+      await app.click('.cc-format-btn')
+      await app.click('.cc-format-menu [data-safezone]')
+      await app.waitFor(`!!document.querySelector('.cc-frame .safe')`, { label: 'vung an toan' })
+      check('bat "Hien vung an toan": hien lop vung an toan tren khung', true)
+      // dong menu bang Escape va bam ra ngoai
+      await app.key('Escape')
+      await app.waitFor(`!document.querySelector('.cc-format-menu')`, { label: 'dong bang Escape' })
+      await app.click('.cc-format-btn')
+      await app.waitFor(`!!document.querySelector('.cc-format-menu')`, { label: 'mo lai' })
+      await app.click('.cc-tlbar .cur')
+      await app.waitFor(`!document.querySelector('.cc-format-menu')`, { label: 'dong khi bam ra ngoai' })
+      check('menu dong bang Escape va khi bam ra ngoai', true)
+      // moi timeline mot ti le
+      await app.click('.cc-format-btn'); await app.click('.cc-format-menu [data-ratio-option="1:1"]')
+      await app.waitFor(`document.querySelector('.cc-frame').style.aspectRatio === '1 / 1'`, { label: '1:1' })
+      await app.click('.cc-tltab-add')
+      await app.waitFor(`document.querySelectorAll('.cc-tltab').length === 2`, { label: 'tab 2' })
+      await app.click('.cc-format-btn'); await app.click('.cc-format-menu [data-ratio-option="16:9"]')
+      await app.waitFor(`document.querySelector('.cc-format-btn').dataset.ratio === '16:9'`, { label: 'tab 2 16:9' })
+      await app.click('.cc-tltab .nm', 0)
+      await app.waitFor(`document.querySelector('.cc-format-btn').dataset.ratio === '1:1'`, { label: 've tab 1' })
+      check('moi timeline (tab) giu ti le rieng: tab 1 = 1:1, tab 2 = 16:9', true)
+      // hop Xuat nhac ve nut ti le
+      await app.click('.cc-top .cc-export')
+      await app.waitFor(`!!document.querySelector('.cc-modal-box .exp-start')`, { label: 'hop thoai xuat' })
+      check('hop Xuat co ghi chu: doi ti le chinh o nut duoi khung xem truoc', /nút tỉ lệ dưới khung xem trước/.test(await app.text('.cc-modal-box')))
+      check('khong co loi runtime', app.errors.length === 0, app.errors.slice(0, 2).join(' | '))
+    } finally { app.close() }
+  })
+
   // Keo giua V1 va cac duong phu, va khoi tieng goc A1 sang duong tieng khac
   scenario('keo clip V1 len V3 thanh lop phu (don V1, mang theo tieng), keo lai xuong V1, hoan tac', async () => {
     const app = await launchApp({ project: projectOf(fx) })

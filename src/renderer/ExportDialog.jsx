@@ -32,6 +32,7 @@ export default function ExportDialog({
           <>
             <div className="grp">
               <label>{t('export_ratio_main', { r: ratio === 'original' ? t('ratio_original') : ratio })}</label>
+              <small className="cap-hint">{t('export_ratio_hint')}</small>
               <label className="vlbl">{t('extra_ratios')}</label>
               <div className="seg wrap">
                 {['9:16', '1:1', '4:5', '16:9'].filter((r) => r !== ratio).map((r) => (

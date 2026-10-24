@@ -451,6 +451,10 @@ const STR = {
     ip_pan_hint: 'Chỉ có tác dụng khi xuất; xem trước chưa nghe được.',
     ip_use_sound: 'Dùng tiếng của video này khi xuất',
     ip_use_sound_hint: 'Xem trước nghe tối đa 100%; bản xuất khuếch đại đúng giá trị. Mờ vào / mờ ra áp dụng cho cả tiếng.',
+    ip_nothing: 'Chưa chọn gì. Bấm một clip hoặc mục trên timeline để xem và chỉnh thuộc tính. Tỉ lệ khung của cả video đổi ở nút tỉ lệ dưới khung xem trước.',
+    format_tip: 'Tỉ lệ khung và vùng an toàn (áp dụng cho cả video)',
+    format_whole_video: 'Tỉ lệ khung của CẢ video (mỗi timeline một tỉ lệ), không phải của riêng clip nào.',
+    export_ratio_hint: 'Đổi tỉ lệ chính ở nút tỉ lệ dưới khung xem trước; ở đây chỉ chọn thêm các tỉ lệ phụ.',
     tip_first: 'Mẹo: nhấn ? để xem toàn bộ phím tắt. Kéo mép các panel để đổi kích thước.'
   },
   en: {
@@ -896,6 +900,10 @@ const STR = {
     ip_pan_hint: 'Applies on export only; the preview does not play it.',
     ip_use_sound: 'Use this video\'s sound in the export',
     ip_use_sound_hint: 'Preview plays at most 100%; the export applies the exact value. Fade in / out also applies to the sound.',
+    ip_nothing: 'Nothing selected. Click a clip or item on the timeline to see and edit its properties. The aspect ratio of the whole video is set by the ratio button below the preview.',
+    format_tip: 'Aspect ratio and safe zone (applies to the whole video)',
+    format_whole_video: 'Aspect ratio of the WHOLE video (one per timeline), not of a single clip.',
+    export_ratio_hint: 'Change the main ratio with the ratio button below the preview; here you only add extra ratios.',
     tip_first: 'Tip: press ? to see all keyboard shortcuts. Drag panel edges to resize.'
   }
 }
